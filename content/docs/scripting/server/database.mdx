@@ -212,9 +212,9 @@ local success = DB.Delete("items", "item:old_sword")
 
 </Accordion>
 
-<Accordion title="DB.Find(table, filter?) → array">
+<Accordion title="DB.Find(table, filter?, options?) → array">
 
-Find records matching an optional filter.
+Find records matching an optional filter with pagination and sorting.
 
 ```lua
 -- All records
@@ -226,6 +226,19 @@ local swords = DB.Find("items", {
     subtype = "sword"
 })
 
+-- With pagination and sorting
+local top_players = DB.Find("players", nil, {
+    limit = 10,
+    order_by = "score DESC"
+})
+
+-- Paginated results
+local page2 = DB.Find("items", { rare = true }, {
+    limit = 20,
+    offset = 20,
+    order_by = "name ASC"
+})
+
 for _, item in ipairs(swords) do
     Log(item.name .. " - Damage: " .. item.damage)
 end
@@ -235,10 +248,20 @@ end
   type={{
     table: { type: 'string', description: 'Table name' },
     filter: { type: 'table?', description: 'Optional key-value filter', default: 'nil' },
+    options: { type: 'table?', description: 'Query options (limit, offset, order_by)', default: 'nil' },
   }}
 />
 
+**Options:**
+- `limit` - Maximum records to return
+- `offset` - Records to skip (for pagination)
+- `order_by` - Sort order (e.g., `"score DESC"`, `"name ASC, created_at DESC"`)
+
 **Returns:** Array of matching records (empty array if none found).
+
+<Callout type="warn">
+Avoid unbounded `DB.Find()` calls on large tables. Always use `limit` for production queries to prevent memory issues.
+</Callout>
 
 </Accordion>
 
@@ -454,6 +477,41 @@ Log("Pending writes: " .. pending)
 Batching is automatic. Use `DB.FlushWrites()` only when you need immediate persistence (e.g., before server shutdown).
 </Callout>
 
+#### Handling Write Failures
+
+Fire-and-forget writes can fail silently (network issues, schema violations, etc.). Register a callback to handle failures:
+
+```lua
+-- Subscribe to write failures
+local unsubscribe = DB.OnWriteFailure(function(failure)
+    Warn("DB write failed: " .. failure.operation .. " on " .. failure.table .. ":" .. failure.id)
+    Warn("Error: " .. failure.error)
+
+    -- failure.data contains the original data (for set/update operations)
+    if failure.data then
+        -- Retry, log, or handle as needed
+        DB.SetAsync(failure.table, failure.id, failure.data)  -- Retry
+    end
+end)
+
+-- Later, if needed:
+unsubscribe()
+```
+
+<TypeTable
+  type={{
+    operation: { type: 'string', description: '"set", "update", or "delete"' },
+    table: { type: 'string', description: 'Table name' },
+    id: { type: 'string', description: 'Record ID' },
+    error: { type: 'string', description: 'Error message' },
+    data: { type: 'table?', description: 'Original data (nil for deletes)' },
+  }}
+/>
+
+<Callout type="warn">
+Write failures are rare but can happen during DB connection issues or schema violations. For critical data, use synchronous writes (`DB.Set`) which return success/failure immediately.
+</Callout>
+
 ---
 
 ## Graph Relations
@@ -571,7 +629,7 @@ Transaction `:Update()` supports SurrealQL expressions like `"gold - 100"` for a
 
 ## Live Subscriptions
 
-Subscribe to real-time database changes. Callbacks fire when records are created, updated, or deleted.
+Subscribe to real-time database changes. Callbacks fire when records are created, updated, or deleted **by external sources** (other server instances, admin tools).
 
 ```lua
 local sub_id = DB.Subscribe("players", "Create", function(record)
@@ -590,8 +648,33 @@ end)
 DB.Unsubscribe(sub_id)
 ```
 
-<Callout type="warn">
-Subscriptions receive all changes, including those from other server instances or external tools. Use them for server-wide event handling, not for tracking your own writes.
+### Local Write Filtering
+
+By default, subscriptions **ignore your own writes** - only external changes trigger callbacks. This prevents infinite loops and unnecessary processing.
+
+```lua
+-- Default: only fires for external changes
+DB.Subscribe("players", "Update", function(record)
+    Log("External update to: " .. record.id)
+end)
+
+-- Opt-in: also fires for your own writes
+DB.Subscribe("players", "Update", function(record)
+    Log("Any update to: " .. record.id)
+end, true)  -- includeLocal = true
+```
+
+<TypeTable
+  type={{
+    table: { type: 'string', description: 'Table name' },
+    event: { type: 'string', description: '"Create", "Update", or "Delete"' },
+    callback: { type: 'function', description: 'Called with the affected record' },
+    includeLocal: { type: 'boolean?', description: 'Also fire for your own writes', default: 'false' },
+  }}
+/>
+
+<Callout type="info">
+Use subscriptions for reacting to **external changes** (multi-server sync, admin tools). For your own writes, you already know when they happen - just handle it in the same code that makes the write.
 </Callout>
 
 ---
@@ -690,6 +773,7 @@ DB.DefineEvent("players", "log_update", "UPDATE", [[
 | `DB.Info()` | table | Get database information |
 | `DB.FlushWrites()` | integer | Flush pending async writes |
 | `DB.PendingWriteCount()` | integer | Get pending write count |
+| `DB.OnWriteFailure(callback)` | function | Subscribe to write failures, returns unsubscribe fn |
 
 ---
 
@@ -853,3 +937,28 @@ Player.Subscribe("Destroy", function(player)
     end
 end)
 ```
+
+---
+
+## Consistency Contract
+
+Understanding the exact behavior of each method prevents common bugs:
+
+| Method | Cache Behavior | Blocking | On Failure |
+|--------|---------------|----------|------------|
+| `DB.Get` | Cache-first, DB on miss | Yes | Returns `nil` |
+| `DB.Set` | Optimistic update | Yes | **Rollback cache**, returns `false` |
+| `DB.Update` | Optimistic merge | Yes | **Rollback cache**, returns `false` |
+| `DB.Delete` | Optimistic remove | Yes | **Rollback cache**, returns `false` |
+| `DB.Create` | Cache on success | Yes | Returns `nil` |
+| `DB.SetAsync` (no callback) | Optimistic update | No | Fires `DB.OnWriteFailure` callback |
+| `DB.Query` | **Bypasses cache** | Yes | Returns empty array |
+| `DB.Find` | Caches results | Yes | Returns empty array |
+
+<Callout type="info">
+**Optimistic + Rollback**: Synchronous writes update the cache immediately for instant reads. If the database rejects the write (constraint violation, connection issue), the cache is rolled back to its previous state. This ensures cache never gets out of sync with the database.
+</Callout>
+
+<Callout type="info">
+**Live Query Sync**: Tables you access are automatically subscribed to live queries. External changes (from other server instances or admin tools) update your cache in real-time.
+</Callout>
