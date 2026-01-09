@@ -1,0 +1,202 @@
+---
+title: Events
+description: Client-side event system for local and server communication
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { TypeTable } from 'fumadocs-ui/components/type-table';
+
+# Events (Client)
+
+The client-side `Events` system handles local script communication and sending/receiving messages to/from the server.
+
+---
+
+## Local Events
+
+Local events allow different scripts or parts of your code to communicate within the client.
+
+```lua
+-- Subscribe to local event
+Events.Subscribe("UIReady", function()
+    Log("UI is ready!")
+end)
+
+Events.Subscribe("HealthChanged", function(new_health, old_health)
+    Log("Health: " .. old_health .. " -> " .. new_health)
+end)
+
+-- Fire local event
+Events.Call("UIReady")
+Events.Call("HealthChanged", 75, 100)
+
+-- Unsubscribe
+Events.Unsubscribe("UIReady")
+```
+
+| Method | Description |
+|--------|-------------|
+| `Events.Subscribe(name, callback)` | Subscribe to local event |
+| `Events.Call(name, ...)` | Fire local event with arguments |
+| `Events.Unsubscribe(name)` | Remove all subscriptions |
+
+---
+
+## Remote Events (Client → Server)
+
+### Sending to Server
+
+```lua
+Events.CallServer("PlayerAction", {
+    action = "fire",
+    target_id = 123
+})
+
+Events.CallServer("PurchaseRequest", {
+    item_id = "sword_01"
+})
+```
+
+<TypeTable
+  type={{
+    event_name: {
+      type: 'string',
+      description: 'Name of the remote event',
+    },
+    data: {
+      type: 'any',
+      description: 'Data to send (automatically serialized)',
+    },
+  }}
+/>
+
+### Receiving from Server
+
+```lua
+Events.SubscribeRemote("UpdateScore", function(data)
+    Store.Set("player.score", data.score)
+end)
+
+Events.SubscribeRemote("GameAnnouncement", function(data)
+    MainUI:CallEvent("ShowMessage", data.message)
+end)
+
+Events.SubscribeRemote("PurchaseSuccess", function(data)
+    MainUI:CallEvent("ShowNotification", "Purchased: " .. data.item_id)
+end)
+
+Events.SubscribeRemote("PurchaseFailed", function(data)
+    MainUI:CallEvent("ShowError", data.reason)
+end)
+```
+
+<TypeTable
+  type={{
+    event_name: {
+      type: 'string',
+      description: 'Name of the remote event',
+    },
+    callback: {
+      type: 'function(data)',
+      description: 'Receives data from server (no player param on client)',
+    },
+  }}
+/>
+
+<Callout type="info">
+On client, `SubscribeRemote` callbacks receive only `data`. On server, they receive `(player, data)`.
+</Callout>
+
+---
+
+## API Summary
+
+| Method | Description |
+|--------|-------------|
+| `Events.Subscribe(name, callback)` | Subscribe to local event |
+| `Events.Call(name, ...)` | Fire local event |
+| `Events.Unsubscribe(name)` | Remove subscriptions |
+| `Events.CallServer(name, data)` | Send to server |
+| `Events.SubscribeRemote(name, callback)` | Receive from server |
+
+---
+
+## Examples
+
+### Input to Server Action
+
+```lua
+Input.Register("Fire", "LeftMouseButton")
+
+Input.Bind("Fire", Input.Pressed, function()
+    local hit = Trace.FromCamera(10000)
+    if hit.hit and hit.entity then
+        Events.CallServer("PlayerAttack", {
+            target_id = hit.entity:GetId()
+        })
+    end
+end)
+
+Events.SubscribeRemote("DamageDealt", function(data)
+    MainUI:CallEvent("ShowDamageNumber", data)
+end)
+```
+
+### Game State Updates
+
+```lua
+Events.SubscribeRemote("GameStateUpdate", function(state)
+    Store.SetBatch({
+        ["game.phase"] = state.phase,
+        ["game.timeRemaining"] = state.time_remaining,
+    })
+end)
+
+Events.SubscribeRemote("PhaseChange", function(data)
+    if data.phase == "playing" then
+        MainUI:CallEvent("HideLobby")
+        MainUI:CallEvent("ShowHUD")
+    elseif data.phase == "ended" then
+        MainUI:CallEvent("ShowGameOver")
+    end
+end)
+```
+
+### Ready System
+
+```lua
+Input.Register("Ready", "R")
+
+Input.Bind("Ready", Input.Pressed, function()
+    Events.CallServer("ReadyUp", {})
+    MainUI:CallEvent("ShowNotification", "Ready!")
+end)
+
+Events.SubscribeRemote("PlayerReady", function(data)
+    MainUI:CallEvent("UpdateReadyList", data.ready_players)
+end)
+
+Events.SubscribeRemote("AllPlayersReady", function(data)
+    MainUI:CallEvent("ShowCountdown", data.countdown)
+end)
+```
+
+### Chat System
+
+```lua
+-- Send chat message
+function send_chat(message)
+    Events.CallServer("ChatMessage", {
+        message = message
+    })
+end
+
+-- Receive chat messages
+Events.SubscribeRemote("ChatBroadcast", function(data)
+    MainUI:CallEvent("AddChatMessage", {
+        sender = data.sender_name,
+        message = data.message,
+        team = data.team
+    })
+end)
+```

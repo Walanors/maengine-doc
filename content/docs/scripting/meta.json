@@ -1,0 +1,9 @@
+{
+  "title": "API Reference",
+  "pages": [
+    "server",
+    "client",
+    "shared"
+  ],
+  "defaultOpen": false
+}

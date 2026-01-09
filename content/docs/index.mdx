@@ -1,0 +1,244 @@
+---
+title: Getting Started
+description: Multiplayer game server toolkit with Rust core and Lua scripting
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Step, Steps } from 'fumadocs-ui/components/steps';
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Server, Monitor, Gamepad2, Database, Layout, Code } from 'lucide-react';
+
+# Getting Started
+
+MAEngine is a multiplayer game server toolkit featuring:
+
+- **Rust core** for networking, ECS, and replication
+- **Lua scripting** for game logic (LuaJIT on server, Lua 5.4 on client)
+- **QUIC transport** with TLS 1.3
+- **SurrealDB** for persistent storage
+- **Unreal Engine 5** client with WebUI support
+
+---
+
+## Quick Start
+
+<Steps>
+<Step>
+
+### Create a Server Script
+
+```lua
+-- games/my_game/Server/init.lua
+
+Server.Subscribe("Start", function()
+    Log("Server started!")
+end)
+
+Player.Subscribe("Spawn", function(player)
+    local character = Character.Spawn(Vec3(0, 0, 100))
+    player:Possess(character)
+    player:SetValue("score", 0)
+end)
+
+Events.SubscribeRemote("PlayerAction", function(player, data)
+    Log("Received action from player " .. player:GetId())
+end)
+```
+
+</Step>
+<Step>
+
+### Create a Client Script
+
+```lua
+-- games/my_game/Client/init.lua
+
+-- Create HUD after brief delay
+Timer.Delay(0.5, function()
+    local hud = WebUI.CreateAtScale("HUD", "hud/index.html")
+    hud:SetFullscreen(true)
+    WebUI.ShowViewport(false)
+end)
+
+-- Bind to player value changes
+local player = Client.GetLocalPlayer()
+if player then
+    player:BindValue("score", function(p, key, new, old)
+        -- Update HUD when score changes
+        Log("Score: " .. tostring(new))
+    end)
+end
+
+Input.Register("Fire", "LeftMouseButton")
+Input.Bind("Fire", Input.Pressed, function()
+    Events.CallServer("PlayerAction", { action = "fire" })
+end)
+```
+
+</Step>
+<Step>
+
+### Run the Server
+
+```bash
+.\build.bat run -p core-server -- --game my_game
+```
+
+</Step>
+</Steps>
+
+---
+
+## API Reference
+
+### Server
+
+<Cards>
+  <Card icon={<Server />} title="Server" href="/docs/scripting/server/server">
+    Server lifecycle and management
+  </Card>
+  <Card icon={<Database />} title="Database" href="/docs/scripting/server/database">
+    SurrealDB persistence
+  </Card>
+  <Card icon={<Gamepad2 />} title="Player" href="/docs/scripting/server/player">
+    Player management and possession
+  </Card>
+  <Card title="Entities" href="/docs/scripting/server/entities">
+    Spawning, destruction, custom classes
+  </Card>
+</Cards>
+
+### Client
+
+<Cards>
+  <Card icon={<Monitor />} title="Client" href="/docs/scripting/client/client">
+    Local player and client events
+  </Card>
+  <Card title="WebUI" href="/docs/scripting/client/webui">
+    HTML/CSS/JS interface system
+  </Card>
+  <Card title="Store" href="/docs/scripting/client/store">
+    Lua/JS state synchronization
+  </Card>
+  <Card title="Input" href="/docs/scripting/client/input">
+    Keyboard and mouse bindings
+  </Card>
+  <Card title="Trace" href="/docs/scripting/client/trace">
+    Raycasting and collision
+  </Card>
+</Cards>
+
+---
+
+## Key Concepts
+
+### Server vs Client
+
+<Callout type="info">
+MAEngine is server-authoritative. The server controls all game logic while clients handle rendering and input.
+</Callout>
+
+| Feature | Server | Client |
+|---------|--------|--------|
+| **Runtime** | Rust + LuaJIT | UE5 + Lua 5.4 |
+| **Authority** | Authoritative | Predictive |
+| **Database** | Full access | None |
+| **Entities** | Create/Modify/Delete | Read-only |
+| **WebUI** | None | Full access |
+| **Input** | None | Full access |
+| **Trace** | None | Full access |
+
+### Event-Driven Architecture
+
+```lua
+-- Class-level events
+Character.Subscribe("Spawn", function(character) end)
+Player.Subscribe("Destroy", function(player) end)
+
+-- Instance events
+entity:Subscribe("OnHit", function(ent, damage) end)
+entity:Fire("OnHit", 25)
+```
+
+### Value Replication
+
+<Tabs items={['Public Values', 'Private Values', 'Bindings']}>
+<Tab value="Public Values">
+```lua
+-- Synced to all clients
+entity:SetValue("health", 100)
+player:SetValue("score", 50)
+```
+</Tab>
+<Tab value="Private Values">
+```lua
+-- Synced only to the owning player
+player:SetPrivateValue("inventory", { items = {} })
+player:SetPrivateValue("secret_mission", "Find the key")
+```
+</Tab>
+<Tab value="Bindings">
+```lua
+-- React to value changes
+Character.BindValue("health", function(char, key, newVal, oldVal)
+    if newVal <= 0 then
+        char:Destroy()
+    end
+end)
+```
+</Tab>
+</Tabs>
+
+### Remote Events
+
+<Tabs items={['Server', 'Client']}>
+<Tab value="Server">
+```lua
+-- Receive from client
+Events.SubscribeRemote("PlayerAction", function(player, data)
+    -- Validate and process
+end)
+
+-- Send to client
+Events.CallRemote("UpdateUI", player, { score = 100 })
+Events.BroadcastRemote("GameEvent", { message = "Round started!" })
+```
+</Tab>
+<Tab value="Client">
+```lua
+-- Send to server
+Events.CallServer("PlayerAction", { action = "fire" })
+
+-- Receive from server
+Events.SubscribeRemote("UpdateUI", function(data)
+    hud:CallEvent("SetScore", data.score)
+end)
+```
+</Tab>
+</Tabs>
+
+---
+
+## IDE Support
+
+Download the [EmmyLua type definitions](/docs/scripting/types.lua) for autocomplete in VS Code or IntelliJ.
+
+---
+
+## Project Structure
+
+```
+games/my_game/
+├── Server/
+│   └── init.lua      # Server-side script (authoritative)
+├── Client/
+│   ├── init.lua      # Client-side script (UE5)
+│   └── UI/           # WebUI HTML/CSS/JS files
+│       └── hud/
+│           ├── index.html
+│           ├── style.css
+│           └── script.js
+├── Shared/
+│   └── constants.lua # Shared constants
+└── config.toml       # Game configuration
+```

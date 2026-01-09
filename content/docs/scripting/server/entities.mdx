@@ -1,0 +1,245 @@
+---
+title: Entities
+description: Server-side entity spawning, management, and custom classes
+---
+
+# Entities (Server)
+
+The server has full authority over entities: spawning, destruction, value modification, and network authority.
+
+---
+
+## Class Hierarchy
+
+```
+Entity (base)
+├── Actor (base for actors with transforms)
+│   └── Pawn (can be possessed by players)
+│       └── Character (humanoid characters)
+├── StaticMesh (static geometry)
+├── Prop (physics-enabled objects)
+├── Sound (audio sources)
+├── Particle (particle effects)
+└── Blueprint (Unreal Blueprint actors)
+```
+
+---
+
+## Static Methods (All Entity Classes)
+
+```lua
+-- Subscribe to events
+Character.Subscribe("Spawn", function(entity)
+    Log("Character spawned: " .. entity:GetId())
+end)
+
+Character.Subscribe("Destroy", function(entity)
+    Log("Character destroyed")
+end)
+
+-- Value bindings
+Character.BindValue("health", function(entity, key, newVal, oldVal)
+    if newVal <= 0 then
+        entity:Destroy()
+    end
+end)
+
+-- Get entities
+local all = Character.GetAll()
+local char = Character.GetByID(123)
+local count = Character.GetCount()
+```
+
+---
+
+## Instance Methods
+
+### Identity
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `GetId()` / `GetID()` | integer | Entity's unique ID |
+| `GetClass()` / `GetType()` | string | Class name (e.g., "Character") |
+| `GetBaseClass()` | string | Base class name |
+| `IsA(className)` | boolean | Check class inheritance |
+| `IsValid()` | boolean | Check if entity still exists |
+
+### Transform
+
+```lua
+local pos = entity:GetPosition()  -- or GetLocation()
+entity:SetPosition(Vec3(100, 200, 50))
+
+local rot = entity:GetRotation()
+entity:SetRotation(QuatStatic.FromEuler(0, 90, 0))
+
+local scale = entity:GetScale()
+entity:SetScale(Vec3(2, 2, 2))
+```
+
+### Values (Replicated)
+
+```lua
+-- Public values (synced to all clients)
+entity:SetValue("health", 100)
+entity:SetValue("team", "blue")
+local health = entity:GetValue("health")
+
+-- Private values (synced only to owner)
+entity:SetPrivateValue("secret_code", "abc123")
+```
+
+### Custom Events
+
+```lua
+-- Subscribe to custom instance events
+entity:Subscribe("OnHit", function(ent, damage, attacker)
+    Log("Hit for " .. damage .. " damage")
+end)
+
+-- Fire custom events
+entity:Fire("OnHit", 25, attackerEntity)
+```
+
+### Other Methods
+
+| Method | Description |
+|--------|-------------|
+| `GetAssetKey()` | Get the asset key used to spawn |
+| `SetVisibility(bool)` | Show/hide entity |
+| `SetCollision(bool)` | Enable/disable collision |
+| `Destroy()` | Mark for destruction |
+
+---
+
+## Spawnable Classes
+
+### Character
+
+Humanoid characters that can be possessed by players.
+
+```lua
+local char = Character.Spawn(Vec3(0, 0, 100))
+local char = Character.Spawn(Vec3(0, 0, 100), QuatStatic.Identity())
+local char = Character.Spawn(Vec3(0, 0, 100), nil, "SK_Mannequin")
+```
+
+**Character-specific methods:**
+
+```lua
+local vel = char:GetVelocity()
+char:SetVelocity(Vec3(0, 0, 500))  -- Launch upward
+
+local controlRot = char:GetControlRotation()
+char:SetControlRotation(newRot)
+
+local player_id = char:GetPlayer()  -- Returns player ID or nil
+
+char:Jump()
+local grounded = char:IsGrounded()
+```
+
+**Events:** `Spawn`, `Destroy`, `Possessed`, `UnPossessed`
+
+### StaticMesh
+
+Non-physics static geometry.
+
+```lua
+local mesh = StaticMesh.Spawn(Vec3(0, 0, 0), nil, "SM_Cube")
+```
+
+### Prop
+
+Physics-enabled objects that respond to forces.
+
+```lua
+local prop = Prop.Spawn(Vec3(0, 0, 200), nil, "SM_Crate")
+prop:SetVelocity(Vec3(0, 0, -100))
+```
+
+### Sound
+
+Spatial audio sources.
+
+```lua
+local sound = Sound.Spawn(Vec3(0, 0, 0), "Explosion_Cue", true)  -- auto_play
+```
+
+### Particle
+
+Particle effect emitters.
+
+```lua
+local fx = Particle.Spawn(Vec3(0, 0, 0), nil, "P_Explosion")
+```
+
+### Blueprint
+
+Spawn Unreal Blueprint actors.
+
+```lua
+local bp = Blueprint.Spawn(Vec3(0, 0, 0), nil, "BP_Door")
+```
+
+---
+
+## Custom Classes (Inheritance)
+
+Create custom classes with additional methods:
+
+```lua
+-- Define custom class
+PlayerCharacter = Character.Inherit("PlayerCharacter")
+
+-- Add custom methods
+function PlayerCharacter:TakeDamage(amount)
+    local health = self:GetValue("health") or 100
+    health = health - amount
+    self:SetValue("health", health)
+
+    if health <= 0 then
+        self:Fire("OnDeath")
+    end
+end
+
+function PlayerCharacter:Heal(amount)
+    local health = self:GetValue("health") or 0
+    health = math.min(100, health + amount)
+    self:SetValue("health", health)
+end
+
+-- Use custom class
+local char = PlayerCharacter(Vec3(0, 0, 100))
+char:SetValue("health", 100)
+char:TakeDamage(25)  -- Custom method works!
+```
+
+### Inheritance Chain
+
+```lua
+local char = PlayerCharacter(Vec3(0, 0, 0))
+print(char:IsA("PlayerCharacter"))  -- true
+print(char:IsA("Character"))         -- true
+print(char:IsA("Pawn"))              -- true
+print(char:IsA("Entity"))            -- true
+print(char:GetClass())               -- "PlayerCharacter"
+print(char:GetBaseClass())           -- "Character"
+```
+
+---
+
+## Network Authority
+
+Control which client has authority over an entity:
+
+```lua
+-- Give authority to a player (for client-side prediction)
+entity:SetNetworkAuthority(player:GetId())
+
+-- Return to server authority
+entity:SetNetworkAuthority(nil)
+
+-- Check current authority
+local auth = entity:GetNetworkAuthority()  -- Player ID or nil
+```

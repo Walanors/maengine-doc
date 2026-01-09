@@ -1,0 +1,28 @@
+---
+title: Shared APIs
+description: APIs available on both Server and Client with identical behavior
+---
+
+# Shared APIs
+
+These APIs work **identically** on both Server and Client.
+
+<Cards>
+  <Card title="Timer" href="/docs/scripting/shared/timer">
+    Delayed and repeating callbacks
+  </Card>
+  <Card title="Math Types" href="/docs/scripting/shared/math">
+    Vec3, Quat, Rotator, Color
+  </Card>
+</Cards>
+
+---
+
+## Why Shared?
+
+These APIs have the exact same behavior on both sides:
+
+- **Timer** - `Timer.Delay`, `Timer.Interval`, `Timer.Clear` work the same
+- **Math Types** - `Vec3`, `Quat`, `Rotator`, `Color` are identical
+
+Other APIs like `Player`, `Events`, and `Entities` have **different capabilities** on server vs client, so they have separate documentation pages.

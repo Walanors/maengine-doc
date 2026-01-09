@@ -1,0 +1,199 @@
+---
+title: Events
+description: Server-side event system for local and remote communication
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { TypeTable } from 'fumadocs-ui/components/type-table';
+
+# Events (Server)
+
+The server-side `Events` system handles local script communication and receiving/sending messages to clients.
+
+<Callout type="warn" title="Security">
+Always validate data received from clients. Never trust client data for prices, damage values, or any game logic.
+</Callout>
+
+---
+
+## Local Events
+
+Local events allow different scripts or parts of your code to communicate within the server.
+
+```lua
+-- Subscribe to local event
+Events.Subscribe("GameStarted", function()
+    Log("Game has started!")
+end)
+
+Events.Subscribe("PlayerScored", function(player_id, points)
+    Log("Player " .. player_id .. " scored " .. points .. " points")
+end)
+
+-- Fire local event
+Events.Call("GameStarted")
+Events.Call("PlayerScored", 123, 10)
+
+-- Unsubscribe
+Events.Unsubscribe("GameStarted")
+```
+
+| Method | Description |
+|--------|-------------|
+| `Events.Subscribe(name, callback)` | Subscribe to local event |
+| `Events.Call(name, ...)` | Fire local event with arguments |
+| `Events.Unsubscribe(name)` | Remove all subscriptions |
+
+---
+
+## Remote Events (Server → Client)
+
+### Receiving from Clients
+
+```lua
+Events.SubscribeRemote("ClientAction", function(player, data)
+    Log("Player " .. player:GetId() .. " sent: " .. tostring(data.action))
+
+    -- Validate and handle
+    if data.action == "buy_item" then
+        -- Server validates price, inventory, etc.
+    end
+end)
+```
+
+<TypeTable
+  type={{
+    event_name: {
+      type: 'string',
+      description: 'Name of the remote event',
+    },
+    callback: {
+      type: 'function(player, data)',
+      description: 'Receives the sender Player and data table',
+    },
+  }}
+/>
+
+### Sending to Clients
+
+```lua
+-- Send to specific player
+Events.CallRemote("UpdateScore", player, { score = 100 })
+
+-- Broadcast to all players
+Events.BroadcastRemote("GameAnnouncement", {
+    message = "Round starting!",
+    countdown = 10
+})
+```
+
+<TypeTable
+  type={{
+    event_name: {
+      type: 'string',
+      description: 'Name of the remote event',
+    },
+    player: {
+      type: 'Player | integer',
+      description: 'Target player or player ID (CallRemote only)',
+    },
+    data: {
+      type: 'any',
+      description: 'Data to send (automatically serialized)',
+    },
+  }}
+/>
+
+---
+
+## API Summary
+
+| Method | Description |
+|--------|-------------|
+| `Events.Subscribe(name, callback)` | Subscribe to local event |
+| `Events.Call(name, ...)` | Fire local event |
+| `Events.Unsubscribe(name)` | Remove subscriptions |
+| `Events.SubscribeRemote(name, callback)` | Receive from clients |
+| `Events.CallRemote(name, player, data)` | Send to specific player |
+| `Events.BroadcastRemote(name, data)` | Send to all players |
+
+---
+
+## Examples
+
+### Game State Broadcast
+
+```lua
+local game_state = {
+    phase = "lobby",
+    time_remaining = 0,
+    scores = {}
+}
+
+function broadcast_state()
+    Events.BroadcastRemote("GameStateUpdate", game_state)
+end
+
+Events.SubscribeRemote("ReadyUp", function(player, data)
+    Log("Player " .. player:GetId() .. " is ready")
+end)
+
+Events.Subscribe("PhaseChange", function(new_phase)
+    game_state.phase = new_phase
+    broadcast_state()
+end)
+
+-- Start game
+Events.Call("PhaseChange", "playing")
+```
+
+### Purchase Validation
+
+```lua
+Events.SubscribeRemote("PurchaseRequest", function(player, data)
+    local item_id = data.item_id
+    local price = get_item_price(item_id)  -- Server-side price lookup
+
+    local gold = player:GetPrivateValue("gold") or 0
+    if gold >= price then
+        player:SetPrivateValue("gold", gold - price)
+        give_item_to_player(player, item_id)
+
+        Events.CallRemote("PurchaseSuccess", player, {
+            item_id = item_id,
+            new_gold = gold - price
+        })
+    else
+        Events.CallRemote("PurchaseFailed", player, {
+            reason = "Insufficient gold"
+        })
+    end
+end)
+```
+
+### Damage System
+
+```lua
+Events.SubscribeRemote("PlayerAttack", function(player, data)
+    local target = Entity.GetByID(data.target_id)
+    if not target or not target:IsValid() then return end
+
+    -- Validate attack (range, cooldown, etc.)
+    local attacker = player:GetControlledCharacter()
+    if not attacker then return end
+
+    local distance = attacker:GetPosition():Distance(target:GetPosition())
+    if distance > 500 then return end  -- Too far
+
+    -- Apply damage (server authoritative)
+    local health = target:GetValue("health") or 100
+    health = health - 25  -- Server decides damage, not client
+    target:SetValue("health", health)
+
+    -- Notify attacker
+    Events.CallRemote("DamageDealt", player, {
+        target_id = data.target_id,
+        damage = 25
+    })
+end)
+```

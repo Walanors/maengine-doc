@@ -1,0 +1,221 @@
+---
+title: Player
+description: Server-side Player API for managing connected players
+---
+
+# Player (Server)
+
+The `Player` class represents a connected player. The server has full control: possession, values, kick, messaging.
+
+---
+
+## Static Methods
+
+### Player.Subscribe
+
+Subscribe to player lifecycle events.
+
+```lua
+Player.Subscribe("Spawn", function(player)
+    Log("Player " .. player:GetId() .. " connected")
+    local char = Character.Spawn(Vec3(0, 0, 100))
+    player:Possess(char)
+end)
+
+Player.Subscribe("Ready", function(player)
+    Log("Player " .. player:GetId() .. " finished loading")
+end)
+
+Player.Subscribe("Destroy", function(player)
+    Log("Player " .. player:GetId() .. " disconnected")
+end)
+```
+
+**Available Events:**
+
+| Event | Callback | Description |
+|-------|----------|-------------|
+| `Spawn` | `(player)` | Player connected |
+| `Ready` | `(player)` | Player finished loading |
+| `Destroy` | `(player)` | Player disconnected |
+
+---
+
+### Player.GetAll
+
+Get all connected players.
+
+```lua
+local players = Player.GetAll()
+for _, player in ipairs(players) do
+    Log("Player: " .. player:GetId())
+end
+```
+
+**Returns:** `Player[]`
+
+---
+
+### Player.GetByID
+
+Get a player by their ID.
+
+```lua
+local player = Player.GetByID(123)
+if player and player:IsValid() then
+    player:SendMessage("Hello!")
+end
+```
+
+**Returns:** `Player?`
+
+---
+
+### Player.GetCount
+
+Get the number of connected players.
+
+```lua
+local count = Player.GetCount()
+Server.Broadcast("Players online: " .. count)
+```
+
+**Returns:** `integer`
+
+---
+
+### Player.BindValue
+
+Bind a callback to value changes for all players.
+
+```lua
+Player.BindValue("team", function(player, key, newVal, oldVal)
+    Log("Player " .. player:GetId() .. " changed team to " .. newVal)
+end)
+```
+
+---
+
+## Instance Methods
+
+### Identity
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `GetId()` / `GetID()` | integer | Player's unique ID |
+| `GetConnectionId()` | integer | Network connection ID |
+| `IsValid()` | boolean | Check if player still connected |
+
+### Possession
+
+```lua
+local char = Character.Spawn(Vec3(0, 0, 100))
+player:Possess(char)
+
+-- Later
+player:UnPossess()
+local controlled = player:GetControlledCharacter()
+```
+
+| Method | Description |
+|--------|-------------|
+| `Possess(pawn)` | Take control of a pawn |
+| `UnPossess()` | Release control |
+| `GetControlledCharacter()` | Get possessed character (or nil) |
+
+### Values (Replicated)
+
+```lua
+-- Public values (synced to all clients)
+player:SetValue("score", 100)
+player:SetValue("team", "blue")
+local score = player:GetValue("score")
+
+-- Private values (synced only to this player's client)
+player:SetPrivateValue("inventory", { items = {} })
+player:SetPrivateValue("secret_mission", "Find the key")
+local inv = player:GetPrivateValue("inventory")
+
+-- Bulk access
+local all_public = player:GetAllValues()
+local all_private = player:GetAllPrivateValues()
+```
+
+| Method | Description |
+|--------|-------------|
+| `GetValue(key)` | Get public value |
+| `SetValue(key, value)` | Set public value (synced to all) |
+| `GetPrivateValue(key)` | Get private value |
+| `SetPrivateValue(key, value)` | Set private value (synced to owner) |
+| `BindValue(key, callback)` | React to value changes |
+| `GetAllValues()` | Get all public values |
+| `GetAllPrivateValues()` | Get all private values |
+
+### Communication
+
+```lua
+player:SendMessage("Welcome to the server!")
+player:Kick("Cheating detected")
+local latency = player:GetLatency()  -- milliseconds
+```
+
+| Method | Description |
+|--------|-------------|
+| `SendMessage(msg)` | Send a chat message |
+| `Kick(reason?)` | Disconnect the player |
+| `GetLatency()` | Get network latency in ms |
+
+---
+
+## Examples
+
+### Team-Based Spawn
+
+```lua
+local spawn_points = {
+    red = Vec3(1000, 0, 100),
+    blue = Vec3(-1000, 0, 100)
+}
+
+Player.Subscribe("Spawn", function(player)
+    -- Assign team (alternating)
+    local team = (Player.GetCount() % 2 == 0) and "red" or "blue"
+    player:SetValue("team", team)
+    player:SetValue("score", 0)
+
+    -- Spawn at team location
+    local char = Character.Spawn(spawn_points[team])
+    player:Possess(char)
+end)
+```
+
+### Inventory System
+
+```lua
+Player.Subscribe("Spawn", function(player)
+    -- Load from database
+    local saved = DB.Get("inventories", tostring(player:GetId()))
+    local inventory = saved or { items = {}, gold = 0 }
+    player:SetPrivateValue("inventory", inventory)
+end)
+
+Player.Subscribe("Destroy", function(player)
+    -- Save to database
+    local inventory = player:GetPrivateValue("inventory")
+    DB.SetAsync("inventories", tostring(player:GetId()), inventory)
+end)
+
+Events.SubscribeRemote("BuyItem", function(player, data)
+    local inv = player:GetPrivateValue("inventory")
+    local price = get_item_price(data.item_id)
+
+    if inv.gold >= price then
+        inv.gold = inv.gold - price
+        table.insert(inv.items, data.item_id)
+        player:SetPrivateValue("inventory", inv)
+        Events.CallRemote("PurchaseSuccess", player, { item_id = data.item_id })
+    else
+        Events.CallRemote("PurchaseFailed", player, { reason = "Not enough gold" })
+    end
+end)
+```

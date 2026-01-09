@@ -1,0 +1,245 @@
+---
+title: Entities
+description: Client-side entity access and value bindings
+---
+
+# Entities (Client)
+
+On the client, entities are **read-only**. You can access their properties and bind to value changes, but the server is authoritative for all modifications.
+
+---
+
+## Getting Entities
+
+```lua
+-- Get by ID
+local entity = Entity.GetByID(123)
+
+-- Get all of a type
+local all_chars = Character.GetAll()
+local all_props = Prop.GetAll()
+
+-- Get count
+local count = Character.GetCount()
+```
+
+---
+
+## Reading Properties
+
+```lua
+local entity = Entity.GetByID(123)
+
+if entity and entity:IsValid() then
+    -- Transform
+    local pos = entity:GetPosition()
+    local rot = entity:GetRotation()
+    local scale = entity:GetScale()
+
+    -- Identity
+    local id = entity:GetId()
+    local class = entity:GetClass()
+    local is_char = entity:IsA("Character")
+
+    -- Values (replicated from server)
+    local health = entity:GetValue("health")
+    local team = entity:GetValue("team")
+end
+```
+
+---
+
+## Available Methods
+
+### Identity
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `GetId()` / `GetID()` | integer | Entity's unique ID |
+| `GetClass()` / `GetType()` | string | Class name |
+| `GetBaseClass()` | string | Base class name |
+| `IsA(className)` | boolean | Check class inheritance |
+| `IsValid()` | boolean | Check if entity exists |
+
+### Transform (Read-Only)
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `GetPosition()` / `GetLocation()` | Vec3 | World position |
+| `GetRotation()` | Quat | World rotation |
+| `GetScale()` | Vec3 | World scale |
+
+### Values (Read-Only)
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `GetValue(key)` | any | Get replicated value |
+| `GetAssetKey()` | string? | Asset used to spawn |
+
+---
+
+## BindValue
+
+React to value changes replicated from the server.
+
+### Instance Binding
+
+```lua
+local char = Character.GetByID(123)
+
+char:BindValue("health", function(entity, key, newVal, oldVal)
+    Log("Entity " .. entity:GetId() .. " health: " .. tostring(newVal))
+end)
+```
+
+### Class-Level Binding
+
+Bind to value changes for all entities of a class.
+
+```lua
+Character.BindValue("health", function(entity, key, newVal, oldVal)
+    -- Any character's health changed
+    if newVal <= 0 then
+        -- Play death effect locally
+        local pos = entity:GetPosition()
+        Log("Character died at " .. tostring(pos))
+    end
+end)
+
+Character.BindValue("team", function(entity, key, newVal, oldVal)
+    -- Update nameplate color based on team
+end)
+```
+
+---
+
+## Subscribe to Events
+
+```lua
+-- Entity spawned (replicated to client)
+Character.Subscribe("Spawn", function(entity)
+    Log("Character " .. entity:GetId() .. " appeared")
+end)
+
+-- Entity destroyed
+Character.Subscribe("Destroy", function(entity)
+    Log("Character " .. entity:GetId() .. " removed")
+end)
+
+-- Character possessed by a player
+Character.Subscribe("Possessed", function(char, player)
+    Log("Character possessed by player " .. player:GetId())
+end)
+```
+
+---
+
+## Character-Specific
+
+Characters have additional read-only methods:
+
+```lua
+local char = Client.GetLocalCharacter()
+
+if char then
+    local vel = char:GetVelocity()
+    local speed = vel:Length()
+
+    local grounded = char:IsGrounded()
+
+    local player_id = char:GetPlayer()
+
+    local control_rot = char:GetControlRotation()
+end
+```
+
+---
+
+## Examples
+
+### Health Bar Above Entity
+
+```lua
+Character.BindValue("health", function(entity, key, health, old_health)
+    -- Update floating health bar
+    local max_health = entity:GetValue("maxHealth") or 100
+    local percent = (health / max_health) * 100
+
+    MainUI:CallEvent("UpdateEntityHealthBar", {
+        entity_id = entity:GetId(),
+        percent = percent
+    })
+end)
+
+Character.Subscribe("Destroy", function(entity)
+    MainUI:CallEvent("RemoveEntityHealthBar", entity:GetId())
+end)
+```
+
+### Targeting System
+
+```lua
+local current_target = nil
+
+Input.Register("Target", "Tab")
+
+Input.Bind("Target", Input.Pressed, function()
+    local hit = Trace.FromCamera(5000)
+    if hit.hit and hit.entity and hit.entity:IsA("Character") then
+        current_target = hit.entity
+        MainUI:CallEvent("SetTarget", {
+            id = hit.entity:GetId(),
+            name = hit.entity:GetValue("nickname"),
+            health = hit.entity:GetValue("health")
+        })
+    else
+        current_target = nil
+        MainUI:CallEvent("ClearTarget")
+    end
+end)
+
+-- Update target health in real-time
+Character.BindValue("health", function(entity, key, health)
+    if current_target and entity:GetId() == current_target:GetId() then
+        MainUI:CallEvent("UpdateTargetHealth", health)
+    end
+end)
+```
+
+### Minimap Tracking
+
+```lua
+Timer.Interval(0.1, function()
+    local entities = {}
+
+    for _, char in ipairs(Character.GetAll()) do
+        if char:IsValid() then
+            local pos = char:GetPosition()
+            table.insert(entities, {
+                id = char:GetId(),
+                x = pos.x,
+                y = pos.y,
+                team = char:GetValue("team")
+            })
+        end
+    end
+
+    MainUI:CallEvent("UpdateMinimap", entities)
+end)
+```
+
+### Door Interaction
+
+```lua
+-- Custom Blueprint class for doors
+Door = Blueprint.Inherit("Door")
+
+Door.BindValue("is_open", function(door, key, is_open, was_open)
+    Log("Door " .. door:GetId() .. " is now " .. (is_open and "OPEN" or "CLOSED"))
+
+    -- Trigger Blueprint animation
+    if door:IsValid() then
+        door:CallBlueprintEvent("OnDoorStateChanged", is_open)
+    end
+end)
+```

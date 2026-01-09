@@ -1,0 +1,193 @@
+---
+title: Timer
+description: Delayed and repeating callback scheduling
+---
+
+# Timer
+
+**Availability:** Server and Client (identical API)
+
+The `Timer` API provides scheduling for delayed and repeating callbacks.
+
+---
+
+## Timer.Delay / Timer.Timeout
+
+Schedule a one-time callback after a delay.
+
+```lua
+local timer_id = Timer.Delay(5.0, function()
+    Log("5 seconds have passed!")
+end)
+
+-- Timer.Timeout is an alias
+local timer_id = Timer.Timeout(2.5, function()
+    Log("2.5 seconds later...")
+end)
+```
+
+**Parameters:**
+- `seconds` (number) - Delay in seconds
+- `callback` (function) - Function to call
+
+**Returns:** `integer` - Timer ID for cancellation
+
+---
+
+## Timer.Interval
+
+Schedule a repeating callback.
+
+```lua
+local timer_id = Timer.Interval(1.0, function()
+    Log("Every second!")
+end)
+
+-- Stop after 10 seconds
+Timer.Delay(10.0, function()
+    Timer.Clear(timer_id)
+end)
+```
+
+**Parameters:**
+- `seconds` (number) - Interval in seconds
+- `callback` (function) - Function to call each interval
+
+**Returns:** `integer` - Timer ID for cancellation
+
+---
+
+## Timer.Clear
+
+Cancel a scheduled timer.
+
+```lua
+local timer_id = Timer.Delay(10.0, function()
+    Log("This won't run")
+end)
+
+Timer.Clear(timer_id)
+```
+
+**Parameters:**
+- `id` (integer) - Timer ID from Delay/Timeout/Interval
+
+**Returns:** `boolean` - True if timer was cancelled
+
+---
+
+## Global Time Functions
+
+### GetWorldTime
+
+Get the time in seconds since the server started.
+
+```lua
+local world_time = GetWorldTime()
+Log("Running for " .. world_time .. " seconds")
+```
+
+### GetDeltaTime
+
+Get the time since the last tick.
+
+```lua
+Server.Subscribe("Tick", function(dt)
+    -- dt is the same as GetDeltaTime()
+    local delta = GetDeltaTime()
+end)
+```
+
+---
+
+## Examples
+
+### Countdown
+
+```lua
+local function countdown(seconds, on_complete)
+    local remaining = seconds
+
+    local timer_id
+    timer_id = Timer.Interval(1.0, function()
+        remaining = remaining - 1
+        Server.Broadcast("Countdown: " .. remaining)
+
+        if remaining <= 0 then
+            Timer.Clear(timer_id)
+            on_complete()
+        end
+    end)
+end
+
+countdown(10, function()
+    Server.Broadcast("GO!")
+end)
+```
+
+### Debounced Save
+
+```lua
+local pending_save = nil
+
+function save_player_data(player)
+    -- Cancel any pending save
+    if pending_save then
+        Timer.Clear(pending_save)
+    end
+
+    -- Schedule save after 2 seconds of no changes
+    pending_save = Timer.Delay(2.0, function()
+        DB.SetAsync("players", tostring(player:GetId()), {
+            score = player:GetValue("score"),
+            inventory = player:GetPrivateValue("inventory")
+        })
+        pending_save = nil
+    end)
+end
+```
+
+### Respawn Timer
+
+```lua
+Character.Subscribe("Destroy", function(char)
+    local player_id = char:GetPlayer()
+    if player_id then
+        Timer.Delay(5.0, function()
+            local player = Player.GetByID(player_id)
+            if player and player:IsValid() then
+                local new_char = Character.Spawn(Vec3(0, 0, 100))
+                player:Possess(new_char)
+            end
+        end)
+    end
+end)
+```
+
+### Game Phase Timer
+
+```lua
+local game_phase = "lobby"
+local phase_timer = nil
+
+function start_game()
+    game_phase = "playing"
+    Events.BroadcastRemote("PhaseChange", { phase = "playing" })
+
+    -- End game after 5 minutes
+    phase_timer = Timer.Delay(300, function()
+        end_game()
+    end)
+end
+
+function end_game()
+    game_phase = "ended"
+    Events.BroadcastRemote("PhaseChange", { phase = "ended" })
+
+    -- Return to lobby after 30 seconds
+    Timer.Delay(30, function()
+        game_phase = "lobby"
+        Events.BroadcastRemote("PhaseChange", { phase = "lobby" })
+    end)
+end
+```

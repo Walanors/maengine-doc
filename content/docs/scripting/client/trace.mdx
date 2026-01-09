@@ -1,0 +1,329 @@
+---
+title: Trace
+description: Raycasting and collision detection
+---
+
+# Trace
+
+**Availability:** Client Only
+
+The `Trace` API provides raycasting functionality for detecting collisions and hit points.
+
+---
+
+## Hit Result
+
+All trace functions return a hit result table:
+
+```lua
+local hit = Trace.Line(start, end_pos)
+if hit.hit then
+    -- hit.location (Vec3) - Trace location
+    -- hit.impact (Vec3) - Actual impact point in world space
+    -- hit.normal (Vec3) - Surface normal at impact
+    -- hit.entity (Entity) - The entity that was hit (or nil)
+    -- hit.distance (number) - Distance from start to hit
+    -- hit.bone (string) - Bone name if hit skeletal mesh (optional)
+    -- hit.component (string) - Component name (optional)
+end
+```
+
+---
+
+## Trace.Line
+
+Cast a ray between two points.
+
+```lua
+local start = Vec3(0, 0, 100)
+local end_pos = Vec3(1000, 0, 100)
+local hit = Trace.Line(start, end_pos)
+
+if hit.hit then
+    Log("Hit at: " .. hit.impact.x .. ", " .. hit.impact.y .. ", " .. hit.impact.z)
+    if hit.entity then
+        Log("Hit entity: " .. hit.entity:GetId())
+    end
+end
+```
+
+**Parameters:**
+- `start` (Vec3) - Start position
+- `end` (Vec3) - End position
+- `ignore_actors` (table, optional) - Array of actors to ignore
+
+**Returns:** Hit result table (check `hit.hit` for success)
+
+---
+
+## Trace.FromCamera
+
+Cast a ray from the camera in the look direction.
+
+```lua
+local hit = Trace.FromCamera(10000)  -- 10000 units range
+
+if hit.hit then
+    Log("Looking at: " .. hit.impact.x .. ", " .. hit.impact.y .. ", " .. hit.impact.z)
+end
+```
+
+**Parameters:**
+- `distance` (number) - Maximum trace distance
+- `ignore_local` (boolean, optional) - Ignore local player's character (default true)
+
+**Returns:** Hit result table (check `hit.hit` for success)
+
+---
+
+## Trace.FromCharacter
+
+Cast a ray from the character's eye position in the look direction.
+
+```lua
+local hit = Trace.FromCharacter(500)  -- 500 units range
+
+if hit.hit then
+    Log("Character looking at entity: " .. (hit.entity and hit.entity:GetId() or "nothing"))
+end
+```
+
+**Parameters:**
+- `distance` (number) - Maximum trace distance
+- `ignore_local` (boolean, optional) - Ignore local player's character (default true)
+
+**Returns:** Hit result table (check `hit.hit` for success)
+
+---
+
+## Trace.Sphere
+
+Cast a sphere along a line (useful for wider hit detection).
+
+```lua
+local start = Vec3(0, 0, 100)
+local end_pos = Vec3(1000, 0, 100)
+local radius = 50
+
+local hit = Trace.Sphere(start, end_pos, radius)
+if hit.hit then
+    Log("Sphere trace hit something")
+end
+```
+
+**Parameters:**
+- `start` (Vec3) - Start position
+- `end` (Vec3) - End position
+- `radius` (number) - Sphere radius
+
+**Returns:** Hit result table (check `hit.hit` for success)
+
+---
+
+## Debug Visualization
+
+### Trace.SetDebug
+
+Enable visual debug lines for traces.
+
+```lua
+Trace.SetDebug(true)           -- Enable with defaults
+Trace.SetDebug(true, 5.0)      -- Lines visible for 5 seconds
+Trace.SetDebug(true, 2.0, 2)   -- 2 seconds, thickness 2
+Trace.SetDebug(false)          -- Disable
+```
+
+**Parameters:**
+- `enabled` (boolean) - Enable or disable debug visualization
+- `duration` (number, optional) - How long lines remain visible (seconds)
+- `thickness` (number, optional) - Line thickness
+
+---
+
+### Trace.IsDebugEnabled
+
+Check if debug visualization is enabled.
+
+```lua
+if Trace.IsDebugEnabled() then
+    Log("Trace debug is ON")
+end
+```
+
+**Returns:** boolean
+
+---
+
+## Examples
+
+### First-Person Shooting
+
+```lua
+Input.Register("Fire", "LeftMouseButton")
+
+Input.Bind("Fire", Input.Pressed, function()
+    local hit = Trace.FromCamera(10000)
+
+    if hit.hit then
+        -- Send hit info to server for validation
+        Events.CallServer("PlayerFired", {
+            hit_location = {
+                x = hit.impact.x,
+                y = hit.impact.y,
+                z = hit.impact.z
+            },
+            hit_normal = {
+                x = hit.normal.x,
+                y = hit.normal.y,
+                z = hit.normal.z
+            },
+            hit_entity = hit.entity and hit.entity:GetId() or nil,
+            distance = hit.distance
+        })
+
+        -- Spawn client-side impact effect
+        -- (visual only, server handles actual damage)
+    else
+        -- Missed - fire into the void
+        Events.CallServer("PlayerFired", { missed = true })
+    end
+end)
+```
+
+---
+
+### Interaction System
+
+```lua
+local interaction_range = 300  -- 3 meters
+
+function get_interactable()
+    local hit = Trace.FromCamera(interaction_range)
+    if hit.hit and hit.entity then
+        local entity_type = hit.entity:GetClass()
+        if entity_type == "Interactable" or entity_type == "Door" or entity_type == "Pickup" then
+            return hit.entity
+        end
+    end
+    return nil
+end
+
+-- Update interaction UI
+Timer.Interval(0.1, function()
+    local target = get_interactable()
+    if target then
+        hud:CallEvent("ShowInteractPrompt", {
+            name = target:GetValue("display_name") or target:GetClass(),
+            action = "Press E to interact"
+        })
+    else
+        hud:CallEvent("HideInteractPrompt")
+    end
+end)
+
+Input.Register("Interact", "E")
+Input.Bind("Interact", Input.Pressed, function()
+    local target = get_interactable()
+    if target then
+        Events.CallServer("PlayerInteract", {
+            target_id = target:GetId()
+        })
+    end
+end)
+```
+
+---
+
+### Ground Check
+
+```lua
+function is_on_ground(position)
+    local start = position + Vec3(0, 0, 10)  -- Slightly above
+    local end_pos = position - Vec3(0, 0, 50)  -- Check below
+
+    local hit = Trace.Line(start, end_pos)
+    return hit.hit
+end
+
+-- Usage
+Timer.Interval(0.1, function()
+    local char = Client.GetLocalCharacter()
+    if char then
+        local grounded = is_on_ground(char:GetPosition())
+        hud:CallEvent("SetGroundedIndicator", grounded)
+    end
+end)
+```
+
+---
+
+### Wall Detection for Climbing
+
+```lua
+function check_wall_ahead()
+    local char = Client.GetLocalCharacter()
+    if not char then return nil end
+
+    local pos = char:GetPosition()
+    local forward = char:GetRotation():Forward()
+
+    -- Check at chest height
+    local start = pos + Vec3(0, 0, 100)
+    local end_pos = start + forward * 100
+
+    local hit = Trace.Line(start, end_pos)
+    if hit.hit then
+        return {
+            wall_point = hit.impact,
+            wall_normal = hit.normal,
+            can_climb = hit.normal.z < 0.3  -- Steep enough to be a wall
+        }
+    end
+    return nil
+end
+```
+
+---
+
+### Sphere Trace for Melee
+
+```lua
+Input.Register("Melee", "V")
+
+Input.Bind("Melee", Input.Pressed, function()
+    local char = Client.GetLocalCharacter()
+    if not char then return end
+
+    local pos = char:GetPosition() + Vec3(0, 0, 100)  -- Chest height
+    local forward = char:GetRotation():Forward()
+    local end_pos = pos + forward * 150  -- 1.5 meter range
+
+    -- Sphere trace for wider hit detection
+    local hit = Trace.Sphere(pos, end_pos, 50)
+
+    if hit.hit and hit.entity then
+        Events.CallServer("PlayerMelee", {
+            target_id = hit.entity:GetId(),
+            hit_location = {
+                x = hit.impact.x,
+                y = hit.impact.y,
+                z = hit.impact.z
+            }
+        })
+    end
+end)
+```
+
+---
+
+### Debug Mode Toggle
+
+```lua
+Input.Register("ToggleDebug", "F3")
+
+Input.Bind("ToggleDebug", Input.Pressed, function()
+    local enabled = Trace.IsDebugEnabled()
+    Trace.SetDebug(not enabled, 3.0, 1)
+    hud:CallEvent("ShowNotification", "Trace debug: " .. (not enabled and "ON" or "OFF"))
+end)
+```

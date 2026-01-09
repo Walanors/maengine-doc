@@ -1,0 +1,87 @@
+---
+title: Client APIs
+description: Client-side Lua APIs for MAEngine
+---
+
+# Client APIs
+
+These APIs are available in **client-side scripts** (`Client/init.lua`).
+
+## Core
+
+<Cards>
+  <Card title="Client" href="/docs/scripting/client/client">
+    Local player access and client events
+  </Card>
+  <Card title="WebUI" href="/docs/scripting/client/webui">
+    HTML/CSS/JS interface system
+  </Card>
+  <Card title="Store" href="/docs/scripting/client/store">
+    Bidirectional Lua/JS state synchronization
+  </Card>
+</Cards>
+
+## Input & Interaction
+
+<Cards>
+  <Card title="Input" href="/docs/scripting/client/input">
+    Keyboard and mouse input bindings
+  </Card>
+  <Card title="Trace" href="/docs/scripting/client/trace">
+    Raycasting and collision detection
+  </Card>
+</Cards>
+
+## Game State (Read-Only)
+
+<Cards>
+  <Card title="Player" href="/docs/scripting/client/player">
+    Read player values and bind to changes
+  </Card>
+  <Card title="Entities" href="/docs/scripting/client/entities">
+    Read entity state and bind to value changes
+  </Card>
+  <Card title="Events" href="/docs/scripting/client/events">
+    Local events and server communication
+  </Card>
+</Cards>
+
+## Shared APIs
+
+These are also available on client (identical to server):
+
+<Cards>
+  <Card title="Timer" href="/docs/scripting/shared/timer">
+    Delayed and repeating callbacks
+  </Card>
+  <Card title="Math Types" href="/docs/scripting/shared/math">
+    Vec3, Quat, Rotator, Color
+  </Card>
+</Cards>
+
+---
+
+## Client Capabilities
+
+The client handles rendering, input, and UI:
+
+- **Input handling** - Register and bind keyboard/mouse actions
+- **WebUI** - HTML/CSS/JS interfaces rendered over the game
+- **Raycasting** - Trace from camera or character
+- **Local state** - Read-only access to replicated entity state
+
+```lua
+-- Client/init.lua
+Timer.Delay(0.5, function()
+    local hud = WebUI.CreateAtScale("HUD", "index.html", 1)
+    hud:SetFullscreen(true)
+end)
+
+Input.Register("Fire", "LeftMouseButton")
+Input.Bind("Fire", Input.Pressed, function()
+    local hit = Trace.FromCamera(10000)
+    if hit.hit then
+        Events.CallServer("PlayerFired", { target = hit.entity:GetID() })
+    end
+end)
+```

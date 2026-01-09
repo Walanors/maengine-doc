@@ -1,0 +1,855 @@
+---
+title: Database
+description: SurrealDB-backed persistent storage with transparent caching and real-time sync
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Step, Steps } from 'fumadocs-ui/components/steps';
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+import { TypeTable } from 'fumadocs-ui/components/type-table';
+
+# Database
+
+**Availability:** Server Only
+
+MAEngine uses [SurrealDB](https://surrealdb.com) for persistent storage with a comprehensive Lua API. The `DB` table provides a **synchronous-first** API with transparent caching, automatic batching, and real-time synchronization via live queries.
+
+---
+
+## Architecture Overview
+
+<Mermaid chart="
+flowchart LR
+    LUA[Lua Script] --> CACHE[(Cache)]
+    CACHE -->|Hit| RETURN((Instant))
+    CACHE -->|Miss| DB[(SurrealDB)]
+    DB --> CACHE
+    DB -.->|Live Sync| CACHE
+" />
+
+---
+
+## Caching System
+
+<Callout type="info">
+The cache is **transparent** - you don't need to manage it manually. Reads check cache first, writes update cache immediately, and live queries keep it synchronized with external changes.
+</Callout>
+
+### How Caching Works
+
+| Operation | Cache Behavior |
+|-----------|----------------|
+| `DB.Get()` | Returns from cache instantly if present; fetches from DB on miss and caches result |
+| `DB.Set()` | Updates cache **immediately**, then blocks until DB confirms |
+| `DB.Create()` | Blocks until DB returns new ID, then caches with ID |
+| `DB.Delete()` | Removes from cache **immediately**, then blocks until DB confirms |
+| `DB.Find()` | Fetches from DB, caches all returned records |
+| `DB.Preload()` | Loads entire table into cache at startup |
+
+### Cache Structure
+
+```
+Cache (HashMap<String, HashMap<String, JsonValue>>)
+├── "players"
+│   ├── "player:abc123" → { name: "Alice", score: 100 }
+│   └── "player:def456" → { name: "Bob", score: 75 }
+├── "items"
+│   ├── "item:sword01" → { name: "Iron Sword", damage: 25 }
+│   └── "item:shield01" → { name: "Wooden Shield", defense: 10 }
+└── "inventories"
+    └── ...
+```
+
+### Preloading for Instant Access
+
+Call `DB.Preload()` during server start to warm the cache:
+
+```lua
+Server.Subscribe("Start", function()
+    local player_count = DB.Preload("players")
+    local item_count = DB.Preload("items")
+    Log("Preloaded " .. player_count .. " players, " .. item_count .. " items")
+end)
+```
+
+<Callout type="warn">
+Only preload tables you'll access frequently. Large tables consume memory and increase startup time.
+</Callout>
+
+---
+
+## Live Query Synchronization
+
+When you access a table, MAEngine automatically subscribes to SurrealDB's live queries. This means:
+
+1. **External changes are synced** - If another server instance or admin tool modifies data, your cache updates automatically
+2. **No stale data** - The cache stays consistent with the database
+3. **Zero configuration** - Happens transparently on first table access
+
+<Mermaid chart="
+flowchart LR
+    EXT[External Change] --> DB[(SurrealDB)] --> LIVE[Live Query] --> CACHE[(Your Cache)]
+" />
+
+---
+
+## API Reference
+
+### Synchronous API (Default)
+
+Use these for most operations. They use cache for instant reads and block only when necessary.
+
+<Accordions>
+
+<Accordion title="DB.Create(table, data) → id | nil">
+
+Create a new record. Blocks until the database returns the new ID.
+
+```lua
+local id = DB.Create("items", {
+    name = "Sword",
+    damage = 25,
+    rarity = "common"
+})
+-- id = "items:ulid1234567890"
+```
+
+<TypeTable
+  type={{
+    table: { type: 'string', description: 'Table name' },
+    data: { type: 'table', description: 'Record data (ID auto-generated)' },
+  }}
+/>
+
+**Returns:** The new record ID (e.g., `"items:abc123"`) or `nil` on failure.
+
+</Accordion>
+
+<Accordion title="DB.Get(table, id) → data | nil">
+
+Get a record by ID. **Instant from cache**, blocks only on cache miss.
+
+```lua
+local player = DB.Get("players", "player:abc123")
+if player then
+    Log("Name: " .. player.name)
+    Log("Score: " .. player.score)
+end
+```
+
+<TypeTable
+  type={{
+    table: { type: 'string', description: 'Table name' },
+    id: { type: 'string', description: 'Record ID' },
+  }}
+/>
+
+**Returns:** The record data as a Lua table, or `nil` if not found.
+
+<Callout type="info">
+After `DB.Preload()`, most `DB.Get()` calls are instant cache hits with zero database latency.
+</Callout>
+
+</Accordion>
+
+<Accordion title="DB.Set(table, id, data) → id | nil">
+
+Replace a record entirely (upsert). Updates cache immediately, blocks until DB confirms.
+
+```lua
+local id = DB.Set("players", "player:abc123", {
+    name = "Alice",
+    score = 100,
+    level = 5
+})
+```
+
+<TypeTable
+  type={{
+    table: { type: 'string', description: 'Table name' },
+    id: { type: 'string', description: 'Record ID' },
+    data: { type: 'table', description: 'Complete record data (replaces existing)' },
+  }}
+/>
+
+**Returns:** The record ID on success, `nil` on failure.
+
+</Accordion>
+
+<Accordion title="DB.Update(table, id, data) → bool">
+
+Merge data with an existing record. Only specified fields are modified.
+
+```lua
+-- Only updates score, keeps other fields intact
+local success = DB.Update("players", "player:abc123", {
+    score = 150
+})
+```
+
+<TypeTable
+  type={{
+    table: { type: 'string', description: 'Table name' },
+    id: { type: 'string', description: 'Record ID' },
+    data: { type: 'table', description: 'Fields to merge (existing fields preserved)' },
+  }}
+/>
+
+**Returns:** `true` on success, `false` on failure.
+
+</Accordion>
+
+<Accordion title="DB.Delete(table, id) → bool">
+
+Delete a record. Removes from cache immediately.
+
+```lua
+local success = DB.Delete("items", "item:old_sword")
+```
+
+**Returns:** `true` on success, `false` on failure.
+
+</Accordion>
+
+<Accordion title="DB.Find(table, filter?) → array">
+
+Find records matching an optional filter.
+
+```lua
+-- All records
+local all_items = DB.Find("items")
+
+-- With filter
+local swords = DB.Find("items", {
+    type = "weapon",
+    subtype = "sword"
+})
+
+for _, item in ipairs(swords) do
+    Log(item.name .. " - Damage: " .. item.damage)
+end
+```
+
+<TypeTable
+  type={{
+    table: { type: 'string', description: 'Table name' },
+    filter: { type: 'table?', description: 'Optional key-value filter', default: 'nil' },
+  }}
+/>
+
+**Returns:** Array of matching records (empty array if none found).
+
+</Accordion>
+
+<Accordion title="DB.FindOne(table, filter?) → data | nil">
+
+Find the first record matching a filter.
+
+```lua
+local admin = DB.FindOne("players", { role = "admin" })
+if admin then
+    Log("Admin found: " .. admin.name)
+end
+```
+
+**Returns:** First matching record or `nil`.
+
+</Accordion>
+
+<Accordion title="DB.Query(sql, bindings?) → array">
+
+Execute raw SurrealQL. Always hits the database (queries are not cached).
+
+```lua
+local results = DB.Query([[
+    SELECT * FROM players
+    WHERE score > $min
+    ORDER BY score DESC
+    LIMIT 10
+]], {
+    min = 100
+})
+
+for i, player in ipairs(results) do
+    Log(i .. ". " .. player.name .. ": " .. player.score)
+end
+```
+
+<TypeTable
+  type={{
+    sql: { type: 'string', description: 'SurrealQL query with $param placeholders' },
+    bindings: { type: 'table?', description: 'Parameter values', default: 'nil' },
+  }}
+/>
+
+**Returns:** Array of query results.
+
+<Callout type="warn">
+Raw queries bypass the cache. Use for complex queries that can't be expressed with `Find()`.
+</Callout>
+
+</Accordion>
+
+<Accordion title="DB.Preload(table) → count">
+
+Load all records from a table into cache for instant access.
+
+```lua
+Server.Subscribe("Start", function()
+    local count = DB.Preload("players")
+    Log("Preloaded " .. count .. " players")
+end)
+```
+
+**Returns:** Number of records loaded.
+
+<Callout type="info">
+Call during `Server.Subscribe("Start")` for tables you need instant access to.
+</Callout>
+
+</Accordion>
+
+</Accordions>
+
+---
+
+### Asynchronous API
+
+Use when you explicitly want non-blocking behavior. Perfect for operations during player disconnects.
+
+<Accordions>
+
+<Accordion title="DB.SetAsync(table, id, data, callback?)">
+
+Non-blocking write. Updates cache immediately, DB write happens in background.
+
+<Tabs items={['With Callback', 'Fire-and-Forget']}>
+<Tab value="With Callback">
+```lua
+DB.SetAsync("players", "player:123", { score = 100 }, function(success)
+    Log("Save " .. (success and "succeeded" or "failed"))
+end)
+```
+</Tab>
+<Tab value="Fire-and-Forget">
+```lua
+-- No callback = fire-and-forget with automatic batching
+-- Perfect for player disconnect saves
+DB.SetAsync("players", "player:123", { score = 100 })
+```
+</Tab>
+</Tabs>
+
+<Callout type="info">
+**Fire-and-forget mode** (no callback) uses automatic batching. Multiple writes are combined into a single database transaction, dramatically improving throughput during mass disconnects.
+</Callout>
+
+</Accordion>
+
+<Accordion title="DB.GetAsync(table, id, callback)">
+
+Non-blocking read. Instant from cache, async on miss.
+
+```lua
+DB.GetAsync("players", "player:123", function(data)
+    if data then
+        Log("Found player: " .. data.name)
+    else
+        Log("Player not found")
+    end
+end)
+```
+
+</Accordion>
+
+<Accordion title="DB.CreateAsync(table, data, callback)">
+
+Non-blocking create.
+
+```lua
+DB.CreateAsync("items", { name = "Potion" }, function(id)
+    if id then
+        Log("Created item: " .. id)
+    end
+end)
+```
+
+</Accordion>
+
+<Accordion title="DB.DeleteAsync(table, id, callback?)">
+
+Non-blocking delete.
+
+```lua
+-- Fire-and-forget
+DB.DeleteAsync("items", "item:old")
+
+-- With confirmation
+DB.DeleteAsync("items", "item:old", function(success)
+    Log("Delete: " .. tostring(success))
+end)
+```
+
+</Accordion>
+
+<Accordion title="DB.QueryAsync(sql, callback) / DB.QueryAsync(sql, bindings, callback)">
+
+Non-blocking query.
+
+```lua
+DB.QueryAsync("SELECT * FROM players WHERE score > 100", function(results)
+    Log("Found " .. #results .. " high scorers")
+end)
+
+-- With bindings
+DB.QueryAsync("SELECT * FROM players WHERE score > $min", { min = 100 }, function(results)
+    Log("Found " .. #results .. " high scorers")
+end)
+```
+
+</Accordion>
+
+<Accordion title="DB.FindAsync(table, filter?, callback)">
+
+Non-blocking find.
+
+```lua
+DB.FindAsync("items", { rare = true }, function(results)
+    Log("Found " .. #results .. " rare items")
+end)
+```
+
+</Accordion>
+
+</Accordions>
+
+---
+
+### Write Batching System
+
+<Callout type="info">
+Fire-and-forget operations (`DB.SetAsync` without callback) are automatically batched for optimal performance.
+</Callout>
+
+<Mermaid chart="
+flowchart LR
+    W1[Write 1] & W2[Write 2] & W3[...] & W4[Write 50] --> Q[Queue]
+    Q -->|Flush| TX[(Single Transaction)]
+" />
+
+#### Manual Batch Control
+
+```lua
+-- Flush all pending writes immediately
+local count = DB.FlushWrites()
+Log("Flushed " .. count .. " pending writes")
+
+-- Check pending write count
+local pending = DB.PendingWriteCount()
+Log("Pending writes: " .. pending)
+```
+
+<Callout type="info">
+Batching is automatic. Use `DB.FlushWrites()` only when you need immediate persistence (e.g., before server shutdown).
+</Callout>
+
+---
+
+## Graph Relations
+
+SurrealDB supports graph-style relations between records. Use these for complex data relationships.
+
+<Accordions>
+
+<Accordion title="DB.Relate(from, rel, to, data?) → id">
+
+Create a relation between two records.
+
+```lua
+-- Player owns an item
+local rel_id = DB.Relate("player:1", "owns", "item:sword", {
+    equipped = true,
+    slot = "main_hand",
+    acquired_at = GetUnixTime()
+})
+
+-- Players are friends
+DB.Relate("player:1", "friend", "player:2", {
+    since = GetUnixTime()
+})
+```
+
+</Accordion>
+
+<Accordion title="DB.Unrelate(from, rel, to) → bool">
+
+Remove a relation.
+
+```lua
+DB.Unrelate("player:1", "owns", "item:sword")
+```
+
+</Accordion>
+
+<Accordion title="DB.GetRelated(record, rel, direction?) → array">
+
+Get records related by a relation type.
+
+```lua
+-- Get all items a player owns (outgoing relations)
+local items = DB.GetRelated("player:1", "owns", "out")
+
+-- Get all players who own an item (incoming relations)
+local owners = DB.GetRelated("item:sword", "owns", "in")
+
+-- Get all friends (both directions)
+local friends = DB.GetRelated("player:1", "friend", "both")
+```
+
+<TypeTable
+  type={{
+    record: { type: 'string', description: 'Record ID (e.g., "player:1")' },
+    rel: { type: 'string', description: 'Relation type (e.g., "owns", "friend")' },
+    direction: { type: 'string?', description: '"out" (default), "in", or "both"', default: '"out"' },
+  }}
+/>
+
+</Accordion>
+
+<Accordion title="DB.GetRelation(from, rel, to) → data | nil">
+
+Get relation data between two specific records.
+
+```lua
+local rel = DB.GetRelation("player:1", "owns", "item:sword")
+if rel and rel.equipped then
+    Log("Sword is equipped in " .. rel.slot)
+end
+```
+
+</Accordion>
+
+</Accordions>
+
+---
+
+## Transactions
+
+Execute multiple operations atomically. If any operation fails, all are rolled back.
+
+```lua
+local results = DB.Begin()
+    :Update("players", "1", { gold = "gold - 100" })
+    :Update("players", "2", { gold = "gold + 100" })
+    :Create("trade_log", {
+        from = "player:1",
+        to = "player:2",
+        amount = 100,
+        timestamp = GetUnixTime()
+    })
+    :Commit()
+```
+
+### Transaction Methods
+
+| Method | Description |
+|--------|-------------|
+| `:Create(table, data)` | Add a new record |
+| `:Update(table, id, data)` | Merge with existing (supports SurrealQL expressions) |
+| `:Set(table, id, data)` | Replace entire record |
+| `:Merge(table, id, data)` | Deep merge with existing |
+| `:Delete(table, id)` | Delete a record |
+| `:Relate(from, rel, to, data?)` | Create a relation |
+| `:Commit()` | Execute all operations atomically |
+
+<Callout type="info">
+Transaction `:Update()` supports SurrealQL expressions like `"gold - 100"` for atomic arithmetic operations.
+</Callout>
+
+---
+
+## Live Subscriptions
+
+Subscribe to real-time database changes. Callbacks fire when records are created, updated, or deleted.
+
+```lua
+local sub_id = DB.Subscribe("players", "Create", function(record)
+    Log("New player joined: " .. record.name)
+end)
+
+DB.Subscribe("players", "Update", function(record)
+    Log("Player updated: " .. record.name)
+end)
+
+DB.Subscribe("players", "Delete", function(record)
+    Log("Player left: " .. record.id)
+end)
+
+-- Unsubscribe when done
+DB.Unsubscribe(sub_id)
+```
+
+<Callout type="warn">
+Subscriptions receive all changes, including those from other server instances or external tools. Use them for server-wide event handling, not for tracking your own writes.
+</Callout>
+
+---
+
+## Schema Definition
+
+Define table structure for validation, default values, and indexing.
+
+<Accordions>
+
+<Accordion title="DB.DefineTable(table, mode?)">
+
+Define a table with optional schema mode.
+
+```lua
+-- Schemaless (default) - accepts any fields
+DB.DefineTable("logs")
+
+-- Schemafull - only defined fields allowed
+DB.DefineTable("players", "schemafull")
+```
+
+</Accordion>
+
+<Accordion title="DB.DefineField(table, field, type, options?)">
+
+Define a field with type and optional constraints.
+
+```lua
+DB.DefineField("players", "name", "string")
+DB.DefineField("players", "score", "int", { default = 0 })
+DB.DefineField("players", "email", "string", {
+    assert = "$value != NONE AND $value = /^[^@]+@[^@]+$/"
+})
+DB.DefineField("players", "created_at", "datetime", {
+    default = "time::now()"
+})
+```
+
+**Supported types:** `string`, `int`, `float`, `bool`, `datetime`, `record`, `array`, `object`
+
+</Accordion>
+
+<Accordion title="DB.DefineIndex(table, name, fields, type?)">
+
+Create an index for faster queries.
+
+```lua
+-- Standard index
+DB.DefineIndex("players", "idx_score", { "score" })
+
+-- Unique index (enforces uniqueness)
+DB.DefineIndex("players", "idx_email", { "email" }, "unique")
+
+-- Full-text search index
+DB.DefineIndex("items", "idx_search", { "name", "description" }, "search")
+
+-- Composite index
+DB.DefineIndex("inventory", "idx_player_item", { "player_id", "item_id" })
+```
+
+</Accordion>
+
+<Accordion title="DB.DefineEvent(table, name, when, then)">
+
+Define a database trigger that executes SurrealQL on record changes.
+
+```lua
+-- Log all player updates
+DB.DefineEvent("players", "log_update", "UPDATE", [[
+    CREATE audit_log SET
+        table = "players",
+        record_id = $after.id,
+        action = "update",
+        old_data = $before,
+        new_data = $after,
+        timestamp = time::now()
+]])
+```
+
+**When values:** `"CREATE"`, `"UPDATE"`, `"DELETE"`, or combinations like `"CREATE OR UPDATE"`
+
+</Accordion>
+
+</Accordions>
+
+---
+
+## Utility Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `DB.Count(table, filter?)` | integer | Count matching records |
+| `DB.Exists(table, id)` | boolean | Check if record exists |
+| `DB.DeleteAll(table)` | integer | Delete all records, return count |
+| `DB.Info()` | table | Get database information |
+| `DB.FlushWrites()` | integer | Flush pending async writes |
+| `DB.PendingWriteCount()` | integer | Get pending write count |
+
+---
+
+## Type Preservation
+
+MAEngine automatically preserves `Vec3` and `Quat` types when storing to the database:
+
+```lua
+-- Storing Vec3
+DB.Set("waypoints", "spawn", {
+    position = Vec3(100, 200, 50),
+    rotation = Quat(0, 0, 0, 1)
+})
+
+-- Retrieved as proper types
+local waypoint = DB.Get("waypoints", "spawn")
+local pos = waypoint.position  -- Returns Vec3 userdata
+Log("X: " .. pos.x)            -- Works!
+```
+
+Internally stored as:
+```json
+{
+    "position": { "x": 100, "y": 200, "z": 50, "__type": "Vec3" },
+    "rotation": { "x": 0, "y": 0, "z": 0, "w": 1, "__type": "Quat" }
+}
+```
+
+---
+
+## Best Practices
+
+<Steps>
+
+<Step>
+### Preload at Startup
+
+Load frequently accessed tables into cache during server start:
+
+```lua
+Server.Subscribe("Start", function()
+    DB.Preload("players")
+    DB.Preload("items")
+    DB.Preload("config")
+end)
+```
+
+</Step>
+
+<Step>
+### Use Fire-and-Forget for Disconnects
+
+When players disconnect, use async without callback for optimal batching:
+
+```lua
+Player.Subscribe("Destroy", function(player)
+    -- Fire-and-forget: updates cache, batches DB write
+    DB.SetAsync("players", tostring(player:GetId()), {
+        score = player:GetValue("score"),
+        last_seen = GetUnixTime()
+    })
+end)
+```
+
+</Step>
+
+<Step>
+### Use Transactions for Atomic Operations
+
+When multiple records must change together:
+
+```lua
+-- Trading: both updates succeed or both fail
+DB.Begin()
+    :Update("players", seller_id, { gold = "gold + " .. price })
+    :Update("players", buyer_id, { gold = "gold - " .. price })
+    :Update("items", item_id, { owner = buyer_id })
+    :Commit()
+```
+
+</Step>
+
+<Step>
+### Index Frequently Queried Fields
+
+```lua
+Server.Subscribe("Start", function()
+    DB.DefineIndex("players", "idx_score", { "score" })
+    DB.DefineIndex("items", "idx_owner", { "owner_id" })
+end)
+```
+
+</Step>
+
+</Steps>
+
+---
+
+## Complete Example: Player Inventory System
+
+```lua
+-- Schema setup
+Server.Subscribe("Start", function()
+    DB.DefineTable("inventories", "schemafull")
+    DB.DefineField("inventories", "player_id", "string")
+    DB.DefineField("inventories", "items", "array", { default = "[]" })
+    DB.DefineField("inventories", "gold", "int", { default = 0 })
+    DB.DefineIndex("inventories", "idx_player", { "player_id" }, "unique")
+
+    DB.Preload("inventories")
+    Log("Inventory system ready")
+end)
+
+-- Load inventory
+function LoadInventory(player)
+    local id = tostring(player:GetId())
+    local inv = DB.FindOne("inventories", { player_id = id })
+
+    if not inv then
+        -- Create new inventory
+        local inv_id = DB.Create("inventories", {
+            player_id = id,
+            items = {},
+            gold = 100  -- Starting gold
+        })
+        inv = DB.Get("inventories", inv_id)
+    end
+
+    return inv
+end
+
+-- Save inventory (non-blocking)
+function SaveInventory(player, inventory)
+    DB.SetAsync("inventories", inventory.id, inventory)
+end
+
+-- Add item with validation
+function AddItem(player, item_id)
+    local inv = player:GetPrivateValue("inventory")
+    if #inv.items >= 50 then
+        return false, "Inventory full"
+    end
+
+    table.insert(inv.items, item_id)
+    player:SetPrivateValue("inventory", inv)
+    SaveInventory(player, inv)
+    return true
+end
+
+-- Player spawn
+Player.Subscribe("Spawn", function(player)
+    local inv = LoadInventory(player)
+    player:SetPrivateValue("inventory", inv)
+end)
+
+-- Player disconnect (fire-and-forget save)
+Player.Subscribe("Destroy", function(player)
+    local inv = player:GetPrivateValue("inventory")
+    if inv then
+        SaveInventory(player, inv)
+    end
+end)
+```

@@ -1,0 +1,134 @@
+---
+title: Client
+description: Client-side local player access
+---
+
+# Client
+
+**Availability:** Client Only
+
+The `Client` table provides access to the local player and character.
+
+## Methods
+
+### Client.GetLocalPlayer
+
+Get the local player object.
+
+```lua
+local player = Client.GetLocalPlayer()
+if player then
+    Log("My player ID: " .. player:GetId())
+end
+```
+
+**Returns:** `Player` - The local player userdata, or nil if not yet spawned
+
+---
+
+### Client.GetLocalCharacter
+
+Get the character currently controlled by the local player.
+
+```lua
+local char = Client.GetLocalCharacter()
+if char then
+    local pos = char:GetPosition()
+    Log("Position: " .. pos.x .. ", " .. pos.y .. ", " .. pos.z)
+end
+```
+
+**Returns:** `Character` - The controlled character, or nil if not possessing
+
+---
+
+## Example: Client Initialization
+
+```lua
+-- games/my_game/Client/init.lua
+
+local hud = nil
+local inventory_ui = nil
+
+-- Initialize after brief delay for WebUI system
+Timer.Delay(0.5, function()
+    -- Create UI
+    hud = WebUI.CreateAtScale("HUD", "hud/index.html")
+    hud:SetFullscreen(true)
+
+    inventory_ui = WebUI.CreateAtScale("Inventory", "inventory/index.html")
+    inventory_ui:SetVisible(false)
+
+    -- Setup input
+    Input.Register("Inventory", "I")
+    Input.Bind("Inventory", Input.Pressed, function()
+        inventory_ui:SetVisible(not inventory_ui:IsVisible())
+    end)
+
+    -- Bind to player values
+    local player = Client.GetLocalPlayer()
+    if player then
+        player:BindValue("health", function(p, key, new, old)
+            hud:CallEvent("UpdateHealth", new)
+        end)
+
+        player:BindValue("score", function(p, key, new, old)
+            hud:CallEvent("UpdateScore", new)
+        end)
+    end
+end)
+
+```
+
+---
+
+## Example: Camera-Based Interaction
+
+```lua
+Input.Register("Interact", "E")
+Input.Bind("Interact", Input.Pressed, function()
+    local hit = Trace.FromCamera(500)  -- 500 units range
+    if hit.hit and hit.entity then
+        Events.CallServer("PlayerInteract", {
+            target_id = hit.entity:GetId()
+        })
+    end
+end)
+
+Input.Register("Fire", "LeftMouseButton")
+Input.Bind("Fire", Input.Pressed, function()
+    local char = Client.GetLocalCharacter()
+    if not char then return end
+
+    local hit = Trace.FromCamera(10000)
+    if hit.hit then
+        Events.CallServer("PlayerFired", {
+            hit_location = { x = hit.impact.x, y = hit.impact.y, z = hit.impact.z }
+        })
+    end
+end)
+```
+
+---
+
+## Example: Local Player Info Display
+
+```lua
+Timer.Interval(1.0, function()
+    local player = Client.GetLocalPlayer()
+    local char = Client.GetLocalCharacter()
+
+    if player and char then
+        local pos = char:GetPosition()
+        local vel = char:GetVelocity()
+        local speed = vel:Length()
+
+        -- Update debug UI
+        hud:CallEvent("UpdateDebugInfo", {
+            position = string.format("%.1f, %.1f, %.1f", pos.x, pos.y, pos.z),
+            speed = string.format("%.1f", speed),
+            player_id = player:GetId()
+        })
+    end
+end)
+```

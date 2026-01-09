@@ -1,0 +1,161 @@
+---
+title: Server
+description: Server lifecycle, tick, and management functions
+---
+
+# Server
+
+**Availability:** Server Only
+
+The `Server` table provides server lifecycle events, timing, and management functions.
+
+## Events
+
+### Server.Subscribe
+
+Subscribe to server lifecycle events.
+
+```lua
+Server.Subscribe("Start", function()
+    Log("Server started!")
+    DB.Preload("players")
+end)
+
+Server.Subscribe("Stop", function()
+    Log("Server stopping...")
+    DB.FlushWrites()
+end)
+
+Server.Subscribe("Tick", function(delta_time)
+    -- Called every tick (default 30 times per second)
+    -- delta_time is seconds since last tick
+end)
+```
+
+**Available Events:**
+
+| Event | Callback | Description |
+|-------|----------|-------------|
+| `Start` | `()` | Server finished initializing |
+| `Stop` | `()` | Server is shutting down |
+| `Tick` | `(delta_time: number)` | Called every game tick |
+
+---
+
+## Methods
+
+### Server.GetTick
+
+Get the current tick number since server start.
+
+```lua
+local tick = Server.GetTick()
+Log("Current tick: " .. tick)
+```
+
+**Returns:** `integer`
+
+---
+
+### Server.GetTime
+
+Get milliseconds since server start.
+
+```lua
+local ms = Server.GetTime()
+Log("Server uptime: " .. ms .. "ms")
+```
+
+**Returns:** `integer`
+
+---
+
+### Server.GetTickRate
+
+Get the server tick rate (ticks per second).
+
+```lua
+local rate = Server.GetTickRate()
+Log("Tick rate: " .. rate)  -- e.g., 30
+```
+
+**Returns:** `integer`
+
+---
+
+### Server.Broadcast
+
+Send a message to all connected players.
+
+```lua
+Server.Broadcast("Game starting in 10 seconds!")
+```
+
+**Parameters:**
+- `message` (string) - Message to broadcast
+
+---
+
+### Server.Shutdown
+
+Gracefully shutdown the server.
+
+```lua
+Server.Shutdown("Server maintenance")
+```
+
+**Parameters:**
+- `reason` (string, optional) - Shutdown reason
+
+---
+
+## Example: Game Loop
+
+```lua
+local game_time = 0
+local ROUND_DURATION = 300  -- 5 minutes
+
+Server.Subscribe("Start", function()
+    Log("Game server started")
+    Events.Call("NewRound")
+end)
+
+Server.Subscribe("Tick", function(dt)
+    game_time = game_time + dt
+
+    if game_time >= ROUND_DURATION then
+        game_time = 0
+        Events.Call("RoundEnd")
+        Events.Call("NewRound")
+    end
+end)
+
+Events.Subscribe("NewRound", function()
+    Server.Broadcast("New round started!")
+    -- Reset game state
+end)
+```
+
+---
+
+## Example: Scheduled Shutdown
+
+```lua
+local shutdown_in = nil
+
+Events.SubscribeRemote("AdminShutdown", function(player, data)
+    if player:GetValue("is_admin") then
+        shutdown_in = data.delay or 60
+        Server.Broadcast("Server shutting down in " .. shutdown_in .. " seconds")
+
+        Timer.Interval(1.0, function()
+            shutdown_in = shutdown_in - 1
+            if shutdown_in <= 0 then
+                Server.Shutdown("Scheduled shutdown")
+            elseif shutdown_in <= 10 then
+                Server.Broadcast("Shutdown in " .. shutdown_in .. "...")
+            end
+        end)
+    end
+end)
+```

@@ -1,0 +1,69 @@
+---
+title: Server APIs
+description: Server-side Lua APIs for MAEngine
+---
+
+# Server APIs
+
+These APIs are available in **server-side scripts** (`Server/init.lua`).
+
+## Core
+
+<Cards>
+  <Card title="Server" href="/docs/scripting/server/server">
+    Server lifecycle, tick events, and management
+  </Card>
+  <Card title="Database" href="/docs/scripting/server/database">
+    SurrealDB persistence with sync/async operations
+  </Card>
+</Cards>
+
+## Game Logic
+
+<Cards>
+  <Card title="Player" href="/docs/scripting/server/player">
+    Connected players, possession, values, kick
+  </Card>
+  <Card title="Entities" href="/docs/scripting/server/entities">
+    Spawning, destruction, custom classes
+  </Card>
+  <Card title="Events" href="/docs/scripting/server/events">
+    Local events and remote client communication
+  </Card>
+</Cards>
+
+## Shared APIs
+
+These are also available on server (identical to client):
+
+<Cards>
+  <Card title="Timer" href="/docs/scripting/shared/timer">
+    Delayed and repeating callbacks
+  </Card>
+  <Card title="Math Types" href="/docs/scripting/shared/math">
+    Vec3, Quat, Rotator, Color
+  </Card>
+</Cards>
+
+---
+
+## Server Authority
+
+The server is authoritative for all game state:
+
+- **Entity spawning** - Only the server can create entities
+- **State modification** - Server validates and applies all changes
+- **Database access** - Only server has DB access
+- **Player management** - Kick, ban, possess operations
+
+```lua
+-- Server/init.lua
+Server.Subscribe("Start", function()
+    Log("Server started!")
+end)
+
+Player.Subscribe("Spawn", function(player)
+    local character = Character.Spawn(Vec3(0, 0, 100))
+    player:Possess(character)
+end)
+```

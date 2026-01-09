@@ -1,0 +1,196 @@
+---
+title: Player
+description: Client-side Player API for reading player state
+---
+
+# Player (Client)
+
+On the client, `Player` instances are **read-only**. You can access replicated values but cannot modify them.
+
+---
+
+## Getting the Local Player
+
+```lua
+local player = Client.GetLocalPlayer()
+if player then
+    Log("My ID: " .. player:GetId())
+end
+```
+
+---
+
+## Instance Methods
+
+### Identity
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `GetId()` / `GetID()` | integer | Player's unique ID |
+| `GetControlledCharacter()` | Character? | Currently possessed character |
+| `IsValid()` | boolean | Check if player reference is valid |
+
+### Reading Values
+
+```lua
+local player = Client.GetLocalPlayer()
+
+-- Read public values (set by server)
+local score = player:GetValue("score")
+local team = player:GetValue("team")
+local nickname = player:GetValue("nickname")
+
+-- Private values are also readable on client
+-- (server syncs them only to the owning player)
+local inventory = player:GetValue("inventory")
+```
+
+---
+
+## BindValue
+
+React to value changes replicated from the server.
+
+```lua
+local player = Client.GetLocalPlayer()
+
+player:BindValue("health", function(p, key, newVal, oldVal)
+    Log("Health changed: " .. tostring(oldVal) .. " -> " .. tostring(newVal))
+    Store.Set("player.health", newVal)
+end)
+
+player:BindValue("score", function(p, key, newVal, oldVal)
+    Store.Set("player.score", newVal)
+end)
+
+player:BindValue("team", function(p, key, newVal, oldVal)
+    Log("Team changed to: " .. tostring(newVal))
+end)
+```
+
+---
+
+## Static Methods
+
+### Player.GetAll
+
+Get all players (replicated from server).
+
+```lua
+local players = Player.GetAll()
+for _, p in ipairs(players) do
+    Log("Player " .. p:GetId() .. " - Team: " .. tostring(p:GetValue("team")))
+end
+```
+
+### Player.GetByID
+
+Get a player by ID.
+
+```lua
+local player = Player.GetByID(5)
+if player and player:IsValid() then
+    local name = player:GetValue("nickname")
+end
+```
+
+### Player.GetCount
+
+```lua
+local count = Player.GetCount()
+Log("Players in game: " .. count)
+```
+
+### Player.BindValue (Class-level)
+
+Bind to value changes for all players.
+
+```lua
+Player.BindValue("score", function(player, key, newVal, oldVal)
+    -- Any player's score changed
+    Log("Player " .. player:GetId() .. " score: " .. tostring(newVal))
+end)
+```
+
+---
+
+## Examples
+
+### Sync Player Data to UI
+
+```lua
+Timer.Delay(0.5, function()
+    local player = Client.GetLocalPlayer()
+    if not player then return end
+
+    -- Initial sync
+    Store.SetBatch({
+        ["player.name"] = player:GetValue("nickname") or "Player",
+        ["player.health"] = player:GetValue("health") or 100,
+        ["player.score"] = player:GetValue("score") or 0,
+        ["player.team"] = player:GetValue("team") or "none",
+    })
+
+    -- Reactive sync
+    player:BindValue("health", function(p, k, v)
+        Store.Set("player.health", v)
+    end)
+
+    player:BindValue("score", function(p, k, v)
+        Store.Set("player.score", v)
+    end)
+end)
+```
+
+### Scoreboard
+
+```lua
+function update_scoreboard()
+    local players = Player.GetAll()
+    local scores = {}
+
+    for _, p in ipairs(players) do
+        table.insert(scores, {
+            id = p:GetId(),
+            name = p:GetValue("nickname") or "Player",
+            score = p:GetValue("score") or 0,
+            team = p:GetValue("team")
+        })
+    end
+
+    -- Sort by score descending
+    table.sort(scores, function(a, b) return a.score > b.score end)
+
+    MainUI:CallEvent("UpdateScoreboard", scores)
+end
+
+-- Update scoreboard when any player's score changes
+Player.BindValue("score", function()
+    update_scoreboard()
+end)
+```
+
+### Team Detection
+
+```lua
+local player = Client.GetLocalPlayer()
+
+function is_friendly(other_player)
+    local my_team = player:GetValue("team")
+    local their_team = other_player:GetValue("team")
+    return my_team == their_team
+end
+
+function get_enemies()
+    local enemies = {}
+    local my_team = player:GetValue("team")
+
+    for _, p in ipairs(Player.GetAll()) do
+        if p:GetValue("team") ~= my_team then
+            table.insert(enemies, p)
+        end
+    end
+
+    return enemies
+end
+```

@@ -1,0 +1,267 @@
+---
+title: Input
+description: Input binding and registration for client-side controls
+---
+
+# Input
+
+**Availability:** Client Only
+
+The `Input` API allows you to register input actions and bind callbacks to key events.
+
+---
+
+## Constants
+
+```lua
+Input.Pressed   -- 1: Key was just pressed
+Input.Released  -- 2: Key was just released
+```
+
+---
+
+## Input.Register
+
+Register an action name with a key.
+
+```lua
+Input.Register("Jump", "SpaceBar")
+Input.Register("Fire", "LeftMouseButton")
+Input.Register("AltFire", "RightMouseButton")
+Input.Register("Reload", "R")
+Input.Register("Crouch", "LeftControl")
+Input.Register("Sprint", "LeftShift")
+```
+
+**Parameters:**
+- `action_name` (string) - Name for this action
+- `key_name` (string) - Unreal Engine key name
+
+**Common Key Names:**
+
+| Category | Keys |
+|----------|------|
+| Letters | `A`, `B`, `C`, ... `Z` |
+| Numbers | `Zero`, `One`, `Two`, ... `Nine` |
+| Function | `F1`, `F2`, ... `F12` |
+| Mouse | `LeftMouseButton`, `RightMouseButton`, `MiddleMouseButton`, `ThumbMouseButton`, `ThumbMouseButton2` |
+| Modifiers | `LeftShift`, `RightShift`, `LeftControl`, `RightControl`, `LeftAlt`, `RightAlt` |
+| Special | `SpaceBar`, `Enter`, `Escape`, `Tab`, `Backspace`, `CapsLock` |
+| Arrows | `Up`, `Down`, `Left`, `Right` |
+| Numpad | `NumPadZero`, `NumPadOne`, ... `NumPadNine`, `Add`, `Subtract`, `Multiply`, `Divide` |
+
+---
+
+## Input.Bind
+
+Bind a callback to an action event.
+
+```lua
+Input.Bind("Jump", Input.Pressed, function()
+    Log("Jump pressed!")
+    local char = Client.GetLocalCharacter()
+    if char then
+        char:Jump()
+    end
+end)
+
+Input.Bind("Jump", Input.Released, function()
+    Log("Jump released!")
+end)
+```
+
+**Parameters:**
+- `action_name` (string) - Previously registered action name
+- `event_type` (integer) - `Input.Pressed` or `Input.Released`
+- `callback` (function) - Function to call
+
+---
+
+## Examples
+
+### Basic Movement Controls
+
+```lua
+-- Register movement keys
+Input.Register("MoveForward", "W")
+Input.Register("MoveBack", "S")
+Input.Register("MoveLeft", "A")
+Input.Register("MoveRight", "D")
+Input.Register("Jump", "SpaceBar")
+Input.Register("Crouch", "LeftControl")
+Input.Register("Sprint", "LeftShift")
+
+-- Track key states
+local keys = {
+    forward = false,
+    back = false,
+    left = false,
+    right = false,
+    sprint = false
+}
+
+Input.Bind("MoveForward", Input.Pressed, function() keys.forward = true end)
+Input.Bind("MoveForward", Input.Released, function() keys.forward = false end)
+Input.Bind("MoveBack", Input.Pressed, function() keys.back = true end)
+Input.Bind("MoveBack", Input.Released, function() keys.back = false end)
+Input.Bind("MoveLeft", Input.Pressed, function() keys.left = true end)
+Input.Bind("MoveLeft", Input.Released, function() keys.left = false end)
+Input.Bind("MoveRight", Input.Pressed, function() keys.right = true end)
+Input.Bind("MoveRight", Input.Released, function() keys.right = false end)
+Input.Bind("Sprint", Input.Pressed, function() keys.sprint = true end)
+Input.Bind("Sprint", Input.Released, function() keys.sprint = false end)
+```
+
+---
+
+### Combat Controls
+
+```lua
+Input.Register("Fire", "LeftMouseButton")
+Input.Register("AltFire", "RightMouseButton")
+Input.Register("Reload", "R")
+Input.Register("SwitchWeapon", "Q")
+Input.Register("Grenade", "G")
+
+Input.Bind("Fire", Input.Pressed, function()
+    local hit = Trace.FromCamera(10000)
+    if hit.hit then
+        Events.CallServer("PlayerFired", {
+            hit_location = { x = hit.impact.x, y = hit.impact.y, z = hit.impact.z },
+            hit_entity = hit.entity and hit.entity:GetId() or nil
+        })
+    end
+end)
+
+Input.Bind("Reload", Input.Pressed, function()
+    Events.CallServer("PlayerReload", {})
+end)
+
+local is_aiming = false
+Input.Bind("AltFire", Input.Pressed, function()
+    is_aiming = true
+    Events.CallServer("PlayerAiming", { aiming = true })
+end)
+
+Input.Bind("AltFire", Input.Released, function()
+    is_aiming = false
+    Events.CallServer("PlayerAiming", { aiming = false })
+end)
+```
+
+---
+
+### UI Toggle Controls
+
+```lua
+local inventory_ui = nil
+local map_ui = nil
+
+-- Create UIs after WebUI is ready
+Timer.Delay(0.5, function()
+    inventory_ui = WebUI.CreateAtScale("Inventory", "inventory/index.html")
+    inventory_ui:SetVisible(false)
+
+    map_ui = WebUI.CreateAtScale("Map", "map/index.html")
+    map_ui:SetVisible(false)
+end)
+
+Input.Register("ToggleInventory", "I")
+Input.Register("ToggleMap", "M")
+Input.Register("Escape", "Escape")
+
+Input.Bind("ToggleInventory", Input.Pressed, function()
+    if not inventory_ui then return end
+    local visible = not inventory_ui:IsVisible()
+    inventory_ui:SetVisible(visible)
+    if visible then
+        inventory_ui:BringToFront()
+        WebUI.SetFocusMode("hard")  -- Cursor visible, UI gets input
+    else
+        WebUI.SetFocusMode("none")  -- Game gets input
+    end
+end)
+
+Input.Bind("ToggleMap", Input.Pressed, function()
+    if not map_ui then return end
+    map_ui:SetVisible(not map_ui:IsVisible())
+end)
+
+Input.Bind("Escape", Input.Pressed, function()
+    -- Close any open UI
+    if inventory_ui and inventory_ui:IsVisible() then
+        inventory_ui:SetVisible(false)
+        WebUI.SetFocusMode("none")
+    end
+    if map_ui and map_ui:IsVisible() then
+        map_ui:SetVisible(false)
+    end
+end)
+```
+
+---
+
+### Interaction System
+
+```lua
+Input.Register("Interact", "E")
+Input.Register("Use", "F")
+
+Input.Bind("Interact", Input.Pressed, function()
+    local hit = Trace.FromCamera(300)  -- 3 meter range
+    if hit.hit and hit.entity then
+        Events.CallServer("PlayerInteract", {
+            target_id = hit.entity:GetId()
+        })
+    end
+end)
+
+-- Hold to use
+local use_start_time = nil
+Input.Bind("Use", Input.Pressed, function()
+    use_start_time = GetWorldTime()
+    local hit = Trace.FromCamera(300)
+    if hit.hit and hit.entity then
+        hud:CallEvent("ShowUseProgress", true)
+    end
+end)
+
+Input.Bind("Use", Input.Released, function()
+    if use_start_time then
+        local duration = GetWorldTime() - use_start_time
+        if duration >= 1.0 then  -- Held for 1 second
+            local hit = Trace.FromCamera(300)
+            if hit.hit and hit.entity then
+                Events.CallServer("PlayerUse", {
+                    target_id = hit.entity:GetId(),
+                    duration = duration
+                })
+            end
+        end
+        use_start_time = nil
+        hud:CallEvent("ShowUseProgress", false)
+    end
+end)
+```
+
+---
+
+### Number Keys for Hotbar
+
+```lua
+for i = 1, 9 do
+    local key_name = ({ "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine" })[i]
+    Input.Register("Hotbar" .. i, key_name)
+
+    Input.Bind("Hotbar" .. i, Input.Pressed, function()
+        Events.CallServer("SelectHotbar", { slot = i })
+        hud:CallEvent("SelectSlot", i)
+    end)
+end
+
+Input.Register("Hotbar0", "Zero")
+Input.Bind("Hotbar0", Input.Pressed, function()
+    Events.CallServer("SelectHotbar", { slot = 10 })
+    hud:CallEvent("SelectSlot", 10)
+end)
+```

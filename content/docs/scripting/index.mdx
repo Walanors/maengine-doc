@@ -1,0 +1,100 @@
+---
+title: API Reference
+description: Lua scripting API for MAEngine server and client
+---
+
+# API Reference
+
+MAEngine uses Lua for game logic on both **Server** and **Client** sides. The server runs **LuaJIT** for maximum performance, while the client uses **Lua 5.4** for better UE5 integration.
+
+## Availability Legend
+
+| Icon | Meaning |
+|------|---------|
+| **Server** | Available on server only |
+| **Client** | Available on client only |
+| **Both** | Available on both server and client |
+
+## API Categories
+
+<Cards>
+  <Card title="Server APIs" href="/docs/scripting/server">
+    Server lifecycle, database, spawning, events, player management
+  </Card>
+  <Card title="Client APIs" href="/docs/scripting/client">
+    WebUI, Store, Input, Trace, client events
+  </Card>
+  <Card title="Shared APIs" href="/docs/scripting/shared">
+    Timer, Math Types (identical on both sides)
+  </Card>
+</Cards>
+
+## Quick Start
+
+### Server Script
+
+```lua
+-- games/my_game/Server/init.lua
+
+Server.Subscribe("Start", function()
+    Log("Server started!")
+end)
+
+Player.Subscribe("Spawn", function(player)
+    local character = Character.Spawn(Vec3(0, 0, 100))
+    player:Possess(character)
+end)
+
+Events.SubscribeRemote("ClientAction", function(player, data)
+    Log("Player " .. player:GetId() .. " sent: " .. tostring(data.action))
+end)
+```
+
+### Client Script
+
+```lua
+-- games/my_game/Client/init.lua
+
+-- Create HUD after brief delay for WebUI initialization
+Timer.Delay(0.5, function()
+    local hud = WebUI.CreateAtScale("HUD", "hud/index.html")
+    hud:SetFullscreen(true)
+    WebUI.ShowViewport(false)
+end)
+
+-- Input bindings
+Input.Register("Fire", "LeftMouseButton")
+Input.Bind("Fire", Input.Pressed, function()
+    local hit = Trace.FromCamera(10000)
+    if hit.hit then
+        Events.CallServer("PlayerFired", { target = hit.entity:GetID() })
+    end
+end)
+
+-- Receive events from server
+Events.SubscribeRemote("ScoreUpdated", function(data)
+    Log("New score: " .. data.score)
+end)
+```
+
+## Project Structure
+
+```
+games/my_game/
+├── Server/
+│   └── init.lua      # Server-side script (authoritative)
+├── Client/
+│   ├── init.lua      # Client-side script (UE5)
+│   └── UI/           # WebUI HTML/CSS/JS files
+│       └── hud/
+│           ├── index.html
+│           ├── style.css
+│           └── script.js
+├── Shared/
+│   └── constants.lua # Shared between server/client
+└── config.toml       # Game configuration
+```
+
+## IDE Support
+
+Download the [EmmyLua type definitions](/docs/scripting/types.lua) for autocomplete in VS Code or IntelliJ.

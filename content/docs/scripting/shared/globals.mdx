@@ -1,0 +1,198 @@
+---
+title: Globals
+description: Global utility functions available in Lua scripts
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+# Global Functions
+
+These functions are available globally without any prefix.
+
+---
+
+## Logging
+
+### Log
+
+Output an info message to the console.
+
+```lua
+Log("Player connected")
+Log("Score: " .. player:GetValue("score"))
+```
+
+<Callout type="info">
+`print()` is an alias for `Log()` on the server.
+</Callout>
+
+---
+
+### Warn
+
+Output a warning message. **Server only.**
+
+```lua
+Warn("Player health is negative!")
+```
+
+---
+
+### Error
+
+Output an error message. **Server only.**
+
+```lua
+Error("Failed to load player data")
+```
+
+---
+
+## Time Functions
+
+### GetWorldTime
+
+Returns seconds since the server/game started.
+
+```lua
+local uptime = GetWorldTime()
+Log("Server running for " .. uptime .. " seconds")
+```
+
+**Returns:** `number` - Seconds since start (with decimal precision)
+
+---
+
+### GetDeltaTime
+
+Returns time since the last tick/frame.
+
+```lua
+Server.Subscribe("Tick", function()
+    local dt = GetDeltaTime()
+    -- Use dt for frame-independent movement
+end)
+```
+
+**Returns:** `number` - Delta time in seconds
+
+---
+
+## Timestamps (Server Only)
+
+<Callout type="warn">
+These functions are only available on the **server**. The client does not have access to system time functions.
+</Callout>
+
+### GetTimestamp
+
+Returns the current time as an ISO 8601 UTC string.
+
+```lua
+local timestamp = GetTimestamp()
+-- "2024-01-15T12:30:45Z"
+
+DB.Create("logs", {
+    event = "player_joined",
+    timestamp = GetTimestamp()
+})
+```
+
+**Returns:** `string` - ISO 8601 formatted timestamp
+
+---
+
+### GetUnixTime
+
+Returns the current Unix timestamp in seconds.
+
+```lua
+local unix = GetUnixTime()
+-- 1705320645
+
+player:SetValue("last_seen", GetUnixTime())
+```
+
+**Returns:** `integer` - Unix timestamp (seconds since 1970-01-01)
+
+---
+
+### GetUnixTimeMillis
+
+Returns the current Unix timestamp in milliseconds.
+
+```lua
+local unix_ms = GetUnixTimeMillis()
+-- 1705320645123
+
+-- Useful for high-precision timing
+local start = GetUnixTimeMillis()
+-- ... do something ...
+local elapsed = GetUnixTimeMillis() - start
+Log("Operation took " .. elapsed .. "ms")
+```
+
+**Returns:** `integer` - Unix timestamp in milliseconds
+
+---
+
+## Quick Reference
+
+| Function | Availability | Returns | Description |
+|----------|--------------|---------|-------------|
+| `Log(msg)` | Both | - | Info message |
+| `Warn(msg)` | Server | - | Warning message |
+| `Error(msg)` | Server | - | Error message |
+| `GetWorldTime()` | Both | number | Seconds since start |
+| `GetDeltaTime()` | Both | number | Time since last tick |
+| `GetTimestamp()` | Server | string | ISO 8601 UTC string |
+| `GetUnixTime()` | Server | integer | Unix seconds |
+| `GetUnixTimeMillis()` | Server | integer | Unix milliseconds |
+
+---
+
+## Examples
+
+### Logging Player Actions
+
+```lua
+Player.Subscribe("Spawn", function(player)
+    Log("Player " .. player:GetId() .. " spawned")
+end)
+
+Events.SubscribeRemote("Trade", function(player, data)
+    if not data.target_id then
+        Warn("Trade request missing target_id from " .. player:GetId())
+        return
+    end
+end)
+```
+
+### Saving with Timestamps
+
+```lua
+Player.Subscribe("Destroy", function(player)
+    DB.SetAsync("players", tostring(player:GetId()), {
+        score = player:GetValue("score"),
+        last_seen = GetUnixTime(),
+        last_seen_readable = GetTimestamp()
+    })
+end)
+```
+
+### Performance Measurement
+
+```lua
+local function measure(name, fn)
+    local start = GetUnixTimeMillis()
+    fn()
+    local elapsed = GetUnixTimeMillis() - start
+    Log(name .. " took " .. elapsed .. "ms")
+end
+
+measure("Database preload", function()
+    DB.Preload("players")
+    DB.Preload("items")
+end)
+```

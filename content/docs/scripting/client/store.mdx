@@ -1,0 +1,362 @@
+---
+title: Store
+description: Bidirectional Lua/JS state synchronization
+---
+
+# Store
+
+**Availability:** Client Only
+
+The `Store` API provides bidirectional state synchronization between Lua and JavaScript (WebUI). It's the recommended way to share reactive state between game logic and UI.
+
+---
+
+## Architecture
+
+```
+Lua                         C++ (Single Source of Truth)              JavaScript
+─────────────────────────────────────────────────────────────────────────────────
+Store.Set("player.hp", 75)
+        │
+        └──────────────────► StoreCache (TMap)
+                             PendingUpdates (batched)
+                                      │
+                                      ▼ (on Tick)
+                             FlushStoreUpdatesToJS()
+                                      │
+                                      └──────────────────────► __store:batch event
+                                                                        │
+                                                                        ▼
+                                                               store.player.hp.value = 75
+                                                               (Preact signals auto-update UI)
+```
+
+**Key benefits:**
+- **Single source of truth** in C++ (no duplicate state)
+- **Batched updates** - all changes per frame sent as one event
+- **Reactive UI** - Preact signals auto-update components
+- **No initialization required** - works automatically with WebUI
+
+---
+
+## Quick Start
+
+### Lua Side
+
+```lua
+-- Set a value (syncs to all WebUI views automatically)
+Store.Set("player.health", 75)
+
+-- Get a cached value
+local health = Store.Get("player.health")
+
+-- Set multiple values at once (more efficient)
+Store.SetBatch({
+    ["player.health"] = 100,
+    ["player.mana"] = 50,
+    ["player.name"] = "Hero",
+})
+
+-- Subscribe to changes
+local unsubscribe = Store.Subscribe("player.health", function(newVal, oldVal)
+    Log("Health changed: " .. tostring(oldVal) .. " -> " .. tostring(newVal))
+end)
+
+-- Later: stop listening
+unsubscribe()
+
+-- Debug: print all cached values
+Store.Debug()
+```
+
+### JavaScript Side
+
+```tsx
+// store.ts
+import { createGameStore } from "@maeui/core";
+
+export const store = createGameStore({
+    player: {
+        health: 100,
+        mana: 50,
+        name: "Player",
+    },
+    ui: {
+        menuOpen: false,
+    },
+}, { syncWithLua: true });
+
+// Component automatically updates when Lua calls Store.Set()
+function HealthBar() {
+    return (
+        <div className="health-bar">
+            <div
+                className="health-fill"
+                style={{ width: `${store.player.health}%` }}
+            />
+            <span>{store.player.name}</span>
+        </div>
+    );
+}
+```
+
+---
+
+## Lua API Reference
+
+### Store.Set
+
+Set a single value in the store.
+
+```lua
+Store.Set(path, value)
+```
+
+**Parameters:**
+- `path` (string) - Dot-notation path (e.g., `"player.health"`)
+- `value` (any) - Value to set (nil, boolean, number, string, or table)
+
+**Example:**
+```lua
+Store.Set("player.health", 75)
+Store.Set("player.name", "Walanors")
+Store.Set("ui.menuOpen", true)
+Store.Set("inventory", { sword = 1, shield = 2 })
+```
+
+---
+
+### Store.Get
+
+Get a cached value from the store.
+
+```lua
+local value = Store.Get(path)
+```
+
+**Parameters:**
+- `path` (string) - Dot-notation path
+
+**Returns:** The cached value, or `nil` if not found
+
+**Example:**
+```lua
+local health = Store.Get("player.health")
+local name = Store.Get("player.name")
+
+if Store.Get("ui.menuOpen") then
+    -- menu is open
+end
+```
+
+---
+
+### Store.SetBatch
+
+Set multiple values at once. More efficient than multiple `Set` calls.
+
+```lua
+Store.SetBatch(updates)
+```
+
+**Parameters:**
+- `updates` (table) - Table mapping paths to values
+
+**Example:**
+```lua
+Store.SetBatch({
+    ["player.health"] = 100,
+    ["player.maxHealth"] = 100,
+    ["player.mana"] = 50,
+    ["player.maxMana"] = 100,
+    ["player.name"] = "Hero",
+    ["ui.hudVisible"] = true,
+})
+```
+
+---
+
+### Store.Subscribe
+
+Subscribe to value changes. Returns an unsubscribe function.
+
+```lua
+local unsubscribe = Store.Subscribe(path, callback)
+```
+
+**Parameters:**
+- `path` (string) - Dot-notation path to watch
+- `callback` (function) - Called with `(newValue, oldValue)` when value changes
+
+**Returns:** Function to call to unsubscribe
+
+**Example:**
+```lua
+-- Watch for health changes
+local unsub = Store.Subscribe("player.health", function(newVal, oldVal)
+    Log("Health: " .. tostring(oldVal) .. " -> " .. tostring(newVal))
+
+    if newVal <= 0 then
+        Log("Player died!")
+    end
+end)
+
+-- Later: stop watching
+unsub()
+```
+
+---
+
+### Store.Debug
+
+Print all cached store values to the log.
+
+```lua
+Store.Debug()
+```
+
+**Output example:**
+```
+========================================
+[Store] Current values (5 entries):
+========================================
+  player.health = 75
+  player.maxHealth = 100
+  player.mana = 50
+  player.name = "Hero"
+  ui.menuOpen = false
+========================================
+```
+
+---
+
+## JavaScript API Reference
+
+### createGameStore
+
+Create a reactive store that syncs with Lua.
+
+```typescript
+import { createGameStore } from "@maeui/core";
+
+const store = createGameStore(initialState, options);
+```
+
+**Parameters:**
+- `initialState` (object) - Initial store structure with default values
+- `options` (object, optional):
+  - `syncWithLua` (boolean) - Enable Lua sync, default `true`
+  - `syncDebounce` (number) - Debounce ms for JS→Lua sync, default `16`
+  - `onInit` (function) - Called when store initializes
+  - `onLuaUpdate` (function) - Called when Lua updates a value
+
+**Returns:** Deep signal tree where each primitive is a Preact signal
+
+**Example:**
+```typescript
+const store = createGameStore({
+    player: {
+        health: 100,
+        name: "Player",
+    },
+    game: {
+        score: 0,
+        isPaused: false,
+    },
+}, {
+    syncWithLua: true,
+    onLuaUpdate: (path, value) => {
+        console.log(`Lua updated ${path} to ${value}`);
+    },
+});
+
+// Access values (these are signals)
+store.player.health.value  // 100
+store.game.score.value     // 0
+
+// Set from JS (syncs back to Lua)
+store.player.health.value = 75;
+```
+
+---
+
+## Common Patterns
+
+### Binding Entity Values to Store
+
+Use the Value system to sync entity data to the Store:
+
+```lua
+-- When character nickname changes, update the Store
+Character.BindValue("nickname", function(character, key, newVal, oldVal)
+    if newVal then
+        Store.Set("player.name", newVal)
+    end
+end)
+
+-- When health changes, update the Store
+Character.BindValue("health", function(character, key, newVal, oldVal)
+    Store.Set("player.health", newVal)
+end)
+```
+
+### Initial State Setup
+
+Set initial values when WebUI is created:
+
+```lua
+Timer.Delay(0.5, function()
+    local ui = WebUI.CreateAtScale("HUD", "index.html", 1)
+    ui:SetFullscreen(true)
+
+    -- Set all initial values
+    Store.SetBatch({
+        ["player.health"] = 100,
+        ["player.maxHealth"] = 100,
+        ["player.name"] = "Player",
+        ["ui.hudVisible"] = true,
+        ["ui.menuOpen"] = false,
+    })
+end)
+```
+
+### Menu Toggle Pattern
+
+```lua
+Input.Register("ToggleMenu", "Escape")
+
+Input.Bind("ToggleMenu", Input.Pressed, function()
+    local isOpen = Store.Get("ui.menuOpen")
+    Store.Set("ui.menuOpen", not isOpen)
+
+    if not isOpen then
+        WebUI.SetFocusMode("hard")  -- Show cursor
+    else
+        WebUI.SetFocusMode("none")  -- Hide cursor
+    end
+end)
+```
+
+---
+
+## Supported Value Types
+
+| Lua Type | Store Type | JavaScript Type |
+|----------|------------|-----------------|
+| `nil` | Nil | `null` |
+| `boolean` | Bool | `boolean` |
+| `integer` | Int | `number` |
+| `number` | Float | `number` |
+| `string` | String | `string` |
+| `table` | Table (JSON) | `object` |
+
+**Note:** Tables are serialized to JSON. Nested tables are supported for simple structures.
+
+---
+
+## Performance Tips
+
+1. **Use SetBatch** - When setting multiple values, use `SetBatch` instead of multiple `Set` calls
+2. **Batched by frame** - All `Set` calls in a frame are automatically batched into one JS event
+3. **Subscribe sparingly** - Only subscribe to paths you need to react to in Lua
+4. **Use signals directly** - In JSX, use `{store.player.health}` directly for automatic updates

@@ -1,0 +1,173 @@
+---
+title: Math Types
+description: Vector, quaternion, rotator, and color types for 3D math
+---
+
+# Math Types
+
+**Availability:** Server and Client (identical API)
+
+Math types for 3D calculations.
+
+---
+
+## Vec3
+
+3D vector for positions, directions, and velocities.
+
+### Constructors
+
+```lua
+local v = Vec3(1, 2, 3)
+
+-- Static constructors
+local v = Vec3Static.Zero()       -- (0, 0, 0)
+local v = Vec3Static.One()        -- (1, 1, 1)
+local v = Vec3Static.Forward()    -- (1, 0, 0)
+local v = Vec3Static.Right()      -- (0, 1, 0)
+local v = Vec3Static.Up()         -- (0, 0, 1)
+```
+
+### Properties
+
+```lua
+local x = v.x
+local y = v.y
+local z = v.z
+```
+
+### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `Length()` | number | Vector magnitude |
+| `LengthSquared()` | number | Squared magnitude (faster) |
+| `Normalized()` | Vec3 | Unit vector |
+| `Dot(other)` | number | Dot product |
+| `Cross(other)` | Vec3 | Cross product |
+| `Distance(other)` | number | Distance to another point |
+| `Lerp(other, t)` | Vec3 | Linear interpolation |
+
+### Operators
+
+```lua
+local sum = v1 + v2
+local diff = v1 - v2
+local scaled = v * 2
+local negated = -v
+```
+
+---
+
+## Quat
+
+Quaternion for rotations.
+
+### Constructors
+
+```lua
+local q = Quat(x, y, z, w)
+
+-- Static constructors
+local q = QuatStatic.Identity()
+local q = QuatStatic.FromEuler(pitch, yaw, roll)  -- Degrees
+local q = QuatStatic.FromAxisAngle(axis, angle)
+```
+
+### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `ToEuler()` | table | `{pitch, yaw, roll}` in degrees |
+| `RotateVector(vec)` | Vec3 | Rotate a vector |
+| `Forward()` | Vec3 | Forward direction |
+| `Right()` | Vec3 | Right direction |
+| `Up()` | Vec3 | Up direction |
+| `Slerp(other, t)` | Quat | Spherical interpolation |
+| `Inverse()` | Quat | Inverse rotation |
+
+---
+
+## Rotator
+
+Euler angles (pitch, yaw, roll) in degrees.
+
+```lua
+local r = Rotator(pitch, yaw, roll)
+local r = RotatorStatic.Zero()
+local r = RotatorStatic.FromQuat(quat)
+
+local q = r:ToQuat()
+```
+
+---
+
+## Color
+
+RGBA color (0.0-1.0 range).
+
+```lua
+local c = Color(1, 0.5, 0.25)       -- RGB
+local c = Color(1, 0.5, 0.25, 0.5)  -- RGBA
+
+-- Presets
+local c = ColorStatic.White()
+local c = ColorStatic.Red()
+local c = ColorStatic.Green()
+local c = ColorStatic.Blue()
+local c = ColorStatic.Black()
+```
+
+---
+
+## Server Examples
+
+### Spawn in Circle
+
+```lua
+local function spawn_in_circle(center, radius, count)
+    local entities = {}
+    for i = 0, count - 1 do
+        local angle = (i / count) * math.pi * 2
+        local offset = Vec3(
+            math.cos(angle) * radius,
+            math.sin(angle) * radius,
+            0
+        )
+        local pos = center + offset
+        local char = Character.Spawn(pos)
+        table.insert(entities, char)
+    end
+    return entities
+end
+
+spawn_in_circle(Vec3(0, 0, 100), 500, 10)
+```
+
+### Distance Check
+
+```lua
+Events.SubscribeRemote("Interact", function(player, data)
+    local char = player:GetControlledCharacter()
+    local target = Entity.GetByID(data.target_id)
+
+    if char and target then
+        local distance = char:GetPosition():Distance(target:GetPosition())
+        if distance <= 200 then
+            -- Close enough to interact
+            target:Fire("OnInteract", player)
+        end
+    end
+end)
+```
+
+### Rotation Towards Target
+
+```lua
+local function look_at(entity, target_pos)
+    local pos = entity:GetPosition()
+    local direction = (target_pos - pos):Normalized()
+    local yaw = math.atan2(direction.y, direction.x) * (180 / math.pi)
+    entity:SetRotation(QuatStatic.FromEuler(0, yaw, 0))
+end
+```
