@@ -1,0 +1,28 @@
+# MAEngine Documentation
+
+> MAEngine is a multiplayer game server toolkit with Rust core, LuaJIT scripting, QUIC transport, and Unreal Engine 5 clients.
+
+This documentation covers the Lua scripting API for both server-side (Rust) and client-side (Unreal C++) game development.
+
+## Documentation
+
+- [Full Documentation](https://engine.modatlas.io/llms-full.txt): Complete documentation in a single file for LLM consumption
+- [API Reference](https://engine.modatlas.io/docs/scripting): Scripting API reference
+- [EmmyLua Types](https://engine.modatlas.io/docs/scripting/types.lua): Type definitions for IDE autocomplete
+
+## Individual Pages
+
+Individual documentation pages can be accessed as markdown by appending `.mdx` to any docs URL:
+- `https://engine.modatlas.io/docs/scripting.mdx`
+- `https://engine.modatlas.io/docs/scripting/server/database.mdx`
+- `https://engine.modatlas.io/docs/scripting/client/webui.mdx`
+
+## Key Topics
+
+- **Server API**: Server lifecycle, Player management, Character spawning, Database (SurrealDB)
+- **Client API**: WebUI (HTML/CSS/JS), Input handling, Trace/Raycasting, Store (state sync)
+- **Shared API**: Vec3, Quat, Rotator, Color, Timer, Events
+
+## Source Code
+
+The MAEngine source is proprietary. This documentation covers the public Lua scripting API.
