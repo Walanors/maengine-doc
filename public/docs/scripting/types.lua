@@ -19,6 +19,34 @@ function GetDeltaTime() end
 ---@param ... any Values to log
 function Log(...) end
 
+---Generate a random UUID v4
+---@return string uuid UUID string (lowercase with hyphens)
+function UUID() end
+
+--------------------------------------------------------------------------------
+-- Global Functions (Server Only)
+--------------------------------------------------------------------------------
+
+---Output a warning message to the console (SERVER ONLY)
+---@param msg string Message to log
+function Warn(msg) end
+
+---Output an error message to the console (SERVER ONLY)
+---@param msg string Message to log
+function Error(msg) end
+
+---Get current time as ISO 8601 UTC string (SERVER ONLY)
+---@return string timestamp ISO 8601 formatted timestamp
+function GetTimestamp() end
+
+---Get Unix timestamp in seconds (SERVER ONLY)
+---@return integer timestamp Seconds since 1970-01-01
+function GetUnixTime() end
+
+---Get Unix timestamp in milliseconds (SERVER ONLY)
+---@return integer timestamp Milliseconds since 1970-01-01
+function GetUnixTimeMillis() end
+
 --------------------------------------------------------------------------------
 -- Math Types (Both Server and Client)
 --------------------------------------------------------------------------------
@@ -825,10 +853,17 @@ function DB.Update(table_name, id, data) end
 ---@return boolean
 function DB.Delete(table_name, id) end
 
+---@class FindOptions
+---@field limit? integer Maximum records to return
+---@field offset? integer Records to skip
+---@field order_by? string Field to order by (prefix with "-" for descending)
+local FindOptions = {}
+
 ---@param table_name string
 ---@param filter? table
+---@param options? FindOptions Query options (limit, offset, order_by)
 ---@return table[]
-function DB.Find(table_name, filter) end
+function DB.Find(table_name, filter, options) end
 
 ---@param table_name string
 ---@param filter? table
@@ -956,8 +991,9 @@ function DB.DefineEvent(table_name, name, when, then_query) end
 ---@param table_name string
 ---@param event "Create"|"Update"|"Delete"
 ---@param callback fun(record: table)
+---@param includeLocal? boolean Include changes from this script (default: false)
 ---@return string subscription_id
-function DB.Subscribe(table_name, event, callback) end
+function DB.Subscribe(table_name, event, callback, includeLocal) end
 
 ---@param subscription_id string
 ---@return boolean
@@ -987,3 +1023,16 @@ function DB.FlushWrites() end
 
 ---@return integer
 function DB.PendingWriteCount() end
+
+-- Write Failure Handling
+
+---@class WriteFailure
+---@field table_name string Table where the write failed
+---@field id string Record ID
+---@field operation "set"|"update"|"delete"|"create" Type of operation
+---@field error string Error message from SurrealDB
+local WriteFailure = {}
+
+---Register a callback for fire-and-forget write failures
+---@param callback fun(failure: WriteFailure)
+function DB.OnWriteFailure(callback) end
