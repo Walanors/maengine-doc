@@ -137,6 +137,29 @@ Log("Operation took " .. elapsed .. "ms")
 
 ---
 
+## Utilities
+
+### UUID
+
+Generate a random UUID v4.
+
+```lua
+local id = UUID()
+-- "550e8400-e29b-41d4-a716-446655440000"
+
+-- Useful for generating unique IDs
+local item = {
+    id = UUID(),
+    name = "Sword",
+    damage = 50
+}
+DB.Set("items", item.id, item)
+```
+
+**Returns:** `string` - UUID v4 string (lowercase with hyphens)
+
+---
+
 ## Quick Reference
 
 | Function | Availability | Returns | Description |
@@ -149,6 +172,7 @@ Log("Operation took " .. elapsed .. "ms")
 | `GetTimestamp()` | Server | string | ISO 8601 UTC string |
 | `GetUnixTime()` | Server | integer | Unix seconds |
 | `GetUnixTimeMillis()` | Server | integer | Unix milliseconds |
+| `UUID()` | Both | string | Random UUID v4 |
 
 ---
 
