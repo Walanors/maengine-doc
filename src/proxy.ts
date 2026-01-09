@@ -3,7 +3,7 @@ import { isMarkdownPreferred, rewritePath } from 'fumadocs-core/negotiation';
 
 const { rewrite: rewriteLLM } = rewritePath('/docs{/*path}', '/llms.mdx/docs{/*path}');
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   // Automatically serve markdown to AI agents based on Accept header
   if (isMarkdownPreferred(request)) {
     const result = rewriteLLM(request.nextUrl.pathname);
