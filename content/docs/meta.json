@@ -3,6 +3,7 @@
   "pages": [
     "index",
     "roadmap",
+    "architecture",
     "scripting"
   ]
 }

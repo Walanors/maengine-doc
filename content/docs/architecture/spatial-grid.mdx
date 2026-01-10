@@ -1,0 +1,196 @@
+---
+title: Spatial Grid
+description: 2D uniform spatial hash grid for fast entity queries and interest management
+---
+
+# Spatial Grid
+
+The Spatial Grid is MAEngine's core spatial indexing system that enables efficient proximity queries for interest management, relevance calculations, and other spatial operations.
+
+## Overview
+
+MAEngine uses a **2D uniform spatial hash grid** that partitions world space into fixed-size cells. Entities are assigned to cells based on their X/Y position, with the Z-axis intentionally ignored. This optimization is designed for flat game worlds where vertical distance rarely matters for relevance.
+
+```
+┌─────────┬─────────┬─────────┬─────────┐
+│  (0,3)  │  (1,3)  │  (2,3)  │  (3,3)  │
+├─────────┼─────────┼─────────┼─────────┤
+│  (0,2)  │  (1,2)  │  (2,2)  │  (3,2)  │
+├─────────┼─────────┼─────────┼─────────┤
+│  (0,1)  │  (1,1)  │ ●(2,1)  │  (3,1)  │  ● = Entity at world pos
+├─────────┼─────────┼─────────┼─────────┤   that maps to cell (2,1)
+│  (0,0)  │  (1,0)  │  (2,0)  │  (3,0)  │
+└─────────┴─────────┴─────────┴─────────┘
+```
+
+## Key Design Decisions
+
+### 2D Grid (Ignoring Z-Axis)
+
+The grid only uses X and Y coordinates for cell assignment:
+- Reduces cell checks from **27** (3x3x3 cube) to **9** (3x3 square) per query
+- Perfect for flat game worlds, MMO-style terrain, or games with limited vertical gameplay
+- Entities at different heights but same X/Y position share a cell
+
+### Cell Size Trade-off
+
+The default cell size is **5000 units (50 meters)**. This is calculated based on:
+
+```
+Character relevance radius: 200m (20,000 units)
+Cell size: 50m
+Cells in each direction: 200m / 50m = 4 cells
+Total cells per query: (4*2+1)² = 81 cells
+```
+
+Compare to a smaller 15m cell size:
+```
+Cells in each direction: 200m / 15m ≈ 13 cells
+Total cells per query: (13*2+1)² = 729 cells (9x more!)
+```
+
+### SmallVec Optimization
+
+Each cell uses `SmallVec<[EntityId; 8]>` for its entity list:
+- Stack-allocated for cells with ≤8 entities (most common case)
+- Falls back to heap allocation only for dense clusters
+- Reduces memory allocations during normal gameplay
+
+## Data Structures
+
+The `SpatialGrid` struct maintains three synchronized hash maps:
+
+```rust
+pub struct SpatialGrid {
+    cell_size: f32,
+    inv_cell_size: f32,  // Precomputed 1.0/cell_size for faster division
+
+    // Cell coordinates -> entities in that cell
+    cells: HashMap<CellCoord, SmallVec<[EntityId; 8]>>,
+
+    // Entity -> its current cell (for fast cell lookups)
+    entity_cells: HashMap<EntityId, CellCoord>,
+
+    // Entity -> its exact position (for distance calculations)
+    entity_positions: HashMap<EntityId, Vec3>,
+}
+```
+
+## Core Operations
+
+### Insert Entity
+
+When inserting an entity:
+1. Calculate cell coordinates from world position
+2. Add entity to the cell's entity list
+3. Store entity-to-cell mapping
+4. Store exact position for distance queries
+
+```rust
+grid.insert(entity_id, Vec3::new(1500.0, 2500.0, 100.0));
+// Maps to cell (0, 0) with 5000-unit cells
+```
+
+### Update Position
+
+Position updates are optimized to only modify cell data when crossing cell boundaries:
+
+1. Check if new position is in a different cell
+2. If same cell: only update stored position (fast path)
+3. If different cell: remove from old cell, add to new cell
+
+### Query Radius
+
+Radius queries return all entities within a distance:
+
+```rust
+// Get all entities within 200m (20000 units) of player
+let nearby = grid.query_radius(player_pos, 20000.0);
+```
+
+The algorithm:
+1. Calculate how many cells the radius spans
+2. Iterate all cells in that range (9 cells for small radius, more for larger)
+3. Return all entities found
+
+### Query with Distance
+
+For relevance calculations that need exact distances:
+
+```rust
+// Returns Vec<(EntityId, distance_squared)> sorted by distance
+let nearby = grid.query_radius_with_distance(pos, 20000.0);
+
+// Unsorted version (faster when order doesn't matter)
+let nearby = grid.query_radius_with_distance_unsorted(pos, 20000.0);
+```
+
+## Integration with Relevance System
+
+The Spatial Grid is the backbone of the `RelevanceManager`. When calculating what entities a player can see:
+
+1. Query the spatial grid for entities within relevance distance
+2. Apply hysteresis (different spawn vs despawn distances)
+3. Check ownership (owners always see their entities)
+4. Calculate update tiers (near/medium/far) based on distance
+
+```
+Player Relevance Radius (200m default)
+        ┌───────────────────────────────┐
+        │     Far Zone (100-200m)       │
+        │   ┌───────────────────────┐   │
+        │   │  Medium Zone (50-100m)│   │
+        │   │   ┌───────────────┐   │   │
+        │   │   │ Near (<50m)   │   │   │
+        │   │   │      ●        │   │   │
+        │   │   │   (Player)    │   │   │
+        │   │   └───────────────┘   │   │
+        │   └───────────────────────┘   │
+        └───────────────────────────────┘
+```
+
+## Performance Characteristics
+
+| Operation | Complexity | Notes |
+|-----------|------------|-------|
+| Insert | O(1) | Hash map insertion |
+| Remove | O(n) | Where n = entities in cell (usually < 8) |
+| Update | O(n) | O(1) if same cell |
+| Query Radius | O(c × e) | c = cells checked, e = entities per cell |
+
+For a 200m query radius with 50m cells:
+- 81 cells checked maximum
+- Average ~4-8 entities per populated cell
+- Effectively O(hundreds) vs O(thousands) for naive linear search
+
+## Usage Example
+
+```rust
+// Create grid with custom cell size
+let mut grid = SpatialGrid::new(5000.0); // 50m cells
+
+// Add entities
+grid.insert(entity_1, Vec3::new(0.0, 0.0, 0.0));
+grid.insert(entity_2, Vec3::new(100.0, 200.0, 50.0));
+
+// Update position (efficient if staying in same cell)
+grid.update(entity_1, Vec3::new(10.0, 10.0, 0.0));
+
+// Query nearby entities
+let nearby = grid.query_radius(player_pos, 20000.0);
+
+// Get distance-sorted results for relevance
+let sorted = grid.query_radius_with_distance(player_pos, 20000.0);
+for (entity, dist_sq) in sorted {
+    let distance = dist_sq.sqrt();
+    println!("Entity {:?} is {} units away", entity, distance);
+}
+```
+
+## Source Code
+
+The spatial grid implementation is located at:
+- `crates/core-server/src/spatial/mod.rs`
+
+The relevance manager that uses it:
+- `crates/core-server/src/relevance/mod.rs`

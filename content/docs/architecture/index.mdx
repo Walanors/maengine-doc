@@ -1,0 +1,34 @@
+---
+title: Server Architecture
+description: Deep dive into MAEngine's server-side systems and design patterns
+---
+
+# Server Architecture
+
+This section documents the core architectural concepts powering MAEngine's game server.
+
+## Core Systems
+
+### [Spatial Grid](/docs/architecture/spatial-grid)
+A 2D uniform spatial hash grid optimized for fast entity proximity queries. Used for interest management and relevance calculations.
+
+### [ECS (Entity Component System)](/docs/architecture/ecs)
+How MAEngine uses Bevy ECS for game state management, including components, resources, bundles, and the EntityManager bridge.
+
+### [Class Extension System](/docs/architecture/class-system)
+The Nanos World-style class system for Lua scripting with Subscribe, BindValue, and Inherit patterns.
+
+### [Relevance & Interest Management](/docs/architecture/relevance)
+How MAEngine filters entity updates based on distance and ownership for efficient networking at scale.
+
+## Design Philosophy
+
+MAEngine's architecture follows these principles:
+
+1. **Server-Authoritative**: The server is the source of truth. Clients submit inputs, server validates and replicates state.
+
+2. **Optimized for Scale**: Systems are designed for 100-1000+ concurrent players with efficient spatial queries and interest management.
+
+3. **Lua Freedom**: Scripts have full access to engine capabilities without safety rails. Trust is given to game developers.
+
+4. **Clean Separation**: Clear boundaries between networking, ECS, scripting, and spatial systems.

@@ -1,0 +1,336 @@
+---
+title: Relevance & Interest Management
+description: How MAEngine filters entity updates based on distance and ownership for efficient networking
+---
+
+# Relevance & Interest Management
+
+The Relevance System determines which entities each client should know about. This is critical for scalable multiplayer—you can't send every entity update to every player.
+
+## Overview
+
+Interest management answers three questions every tick:
+1. **What should spawn?** Entities that just became relevant
+2. **What should despawn?** Entities that are no longer relevant
+3. **What should update?** Relevant entities that changed
+
+```
+┌───────────────────────────────────────────────────────────────────┐
+│                       World State                                  │
+│   ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○  (1000+ entities)       │
+│   ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○                          │
+└───────────────────────────────────────────────────────────────────┘
+                              │
+                   Relevance System
+                              │
+                    ┌─────────┴─────────┐
+                    ▼                   ▼
+        ┌─────────────────┐   ┌─────────────────┐
+        │  Client A sees  │   │  Client B sees  │
+        │   ~50 entities  │   │   ~40 entities  │
+        └─────────────────┘   └─────────────────┘
+```
+
+## Core Concepts
+
+### Relevance Distance
+
+Entities become relevant when within `relevance_distance` of the client's controlled character:
+
+```rust
+pub struct RelevanceConfig {
+    /// Spawn threshold (entity becomes relevant)
+    pub relevance_distance: f32,  // 150m default
+
+    /// Hysteresis factor for despawn
+    pub hysteresis_factor: f32,   // 1.1 = despawn at 165m
+
+    // Update rate thresholds (see Update Tiers)
+    pub near_distance: f32,       // 30m
+    pub medium_distance: f32,     // 70m
+    pub far_distance: f32,        // 120m
+}
+```
+
+### Hysteresis
+
+Prevents flickering when entities hover near the relevance boundary.
+
+Without hysteresis:
+```
+Frame 1: Entity at 149m → RELEVANT (spawn)
+Frame 2: Entity at 151m → NOT RELEVANT (despawn)
+Frame 3: Entity at 149m → RELEVANT (spawn) ← wasteful!
+```
+
+With 10% hysteresis:
+```
+Spawn distance: 150m
+Despawn distance: 165m (150m × 1.1)
+
+Frame 1: Entity at 149m → RELEVANT (spawn)
+Frame 2: Entity at 151m → Still relevant (< 165m)
+Frame 3: Entity at 160m → Still relevant (< 165m)
+Frame 4: Entity at 166m → NOT RELEVANT (despawn)
+```
+
+### Update Tiers
+
+Not all entities need updates every tick. Distance-based LOD for networking:
+
+| Tier | Distance | Update Rate | Use Case |
+|------|----------|-------------|----------|
+| Near | 0-30m | Every tick | Combat, interactions |
+| Medium | 30-70m | Every 2 ticks | Visible movement |
+| Far | 70-120m | Every 4 ticks | Background activity |
+
+```rust
+pub enum UpdateTier {
+    Near,    // tick % 1 == 0 (always)
+    Medium,  // tick % 2 == 0
+    Far,     // tick % 4 == 0
+}
+
+impl UpdateTier {
+    pub fn should_update(&self, tick: u64) -> bool {
+        match self {
+            UpdateTier::Near => true,
+            UpdateTier::Medium => tick % 2 == 0,
+            UpdateTier::Far => tick % 4 == 0,
+        }
+    }
+}
+```
+
+### Type-Specific Configs
+
+Different entity types have different relevance rules:
+
+```rust
+// Characters - visible from farther, important for gameplay
+RelevanceConfig::character() = {
+    relevance_distance: 200m,
+    near_distance: 40m,
+    medium_distance: 100m,
+    far_distance: 160m,
+}
+
+// Props - smaller objects, cull earlier
+RelevanceConfig::prop() = {
+    relevance_distance: 100m,
+    near_distance: 20m,
+    medium_distance: 50m,
+    far_distance: 80m,
+}
+```
+
+## Client Relevance Tracking
+
+Each connected client has tracking state:
+
+```rust
+pub struct ClientRelevance {
+    /// Entities this client knows about (has received spawn packet)
+    pub known_entities: HashSet<EntityId>,
+
+    /// The character this client controls (for position queries)
+    pub controlled_entity: Option<EntityId>,
+
+    /// Entities owned by this client (always relevant)
+    pub owned_entities: HashSet<EntityId>,
+}
+```
+
+### Special Relevance Rules
+
+1. **Owned entities are always relevant**: If you spawn a projectile, you always see it
+2. **Controlled entity is always relevant**: Your character is always relevant to you
+3. **Always-relevant overrides**: Some entities (global sounds, world state) can be marked always-relevant
+
+## Relevance Changes
+
+Each tick, the system calculates changes per-client:
+
+```rust
+pub struct RelevanceChanges {
+    /// Newly relevant - send EntitySpawn packets
+    pub spawns: Vec<EntitySpawn>,
+
+    /// No longer relevant - send EntityDespawn packets
+    pub despawns: Vec<EntityId>,
+
+    /// Still relevant with update tier
+    pub updates: Vec<(EntityId, UpdateTier)>,
+}
+```
+
+### Change Detection Flow
+
+```
+1. Get client's position (from controlled entity)
+2. Query spatial grid for nearby entities
+3. For each nearby entity:
+   - If not in known_entities → SPAWN
+   - If in known_entities → check UPDATE tier
+4. For each known entity:
+   - If not nearby and not owned → DESPAWN
+```
+
+## Authority System
+
+For client-authoritative entities (like player characters), the relevance system also manages authority:
+
+```rust
+pub struct AuthorityState {
+    /// Current authority holder
+    pub current_authority: Option<ConnectionId>,
+
+    /// Candidate for transfer (has been closest)
+    pub candidate_authority: Option<ConnectionId>,
+
+    /// How long candidate has been closest
+    pub candidate_ticks: u32,
+
+    /// Ticks until transfer happens
+    pub transfer_threshold_ticks: u32,
+}
+```
+
+### Authority Models
+
+```rust
+pub enum AuthorityModel {
+    /// Server controls this entity
+    ServerAuthority,
+
+    /// Owner always has authority
+    OwnerAuthority,
+
+    /// Nearest client gets authority (for AI, physics objects)
+    NearestClientAuthority,
+}
+```
+
+**NearestClientAuthority** is useful for:
+- AI characters (nearest player simulates them)
+- Physics objects (nearest player runs physics)
+- Environmental entities (doors, switches)
+
+Transfer happens after the candidate has been closest for `transfer_threshold_ticks` (prevents rapid bouncing).
+
+## Spatial Grid Integration
+
+The relevance system uses the [Spatial Grid](/docs/architecture/spatial-grid) for efficient queries:
+
+```rust
+pub struct RelevanceManager {
+    /// Spatial index for proximity queries
+    spatial_grid: SpatialGrid,
+
+    /// Per-client relevance state
+    client_relevance: HashMap<ConnectionId, ClientRelevance>,
+
+    /// Type-specific configs
+    type_configs: HashMap<EntityClass, RelevanceConfig>,
+
+    /// Authority state for NearestClient entities
+    authority_states: HashMap<EntityId, AuthorityState>,
+}
+```
+
+### Spatial Caching
+
+When many clients are in the same area, we cache spatial queries:
+
+```rust
+/// Cached query results per cell
+pub type SpatialCache = HashMap<CellCoord, Vec<(EntityId, Vec3)>>;
+
+/// Pre-computed relevant entity sets per cell
+pub type CellRelevanceSets = HashMap<CellCoord, HashSet<EntityId>>;
+```
+
+If 50 players are in the same 50m cell, we:
+1. Query spatial grid once for that cell
+2. Cache the results
+3. Reuse for all 50 players
+
+## Performance Characteristics
+
+### Without Interest Management
+
+```
+Entities: 1000
+Players: 100
+Updates/tick: 1000 × 100 = 100,000 packets
+At 30 ticks/sec: 3,000,000 packets/second
+```
+
+### With Interest Management
+
+```
+Entities: 1000
+Players: 100
+Average relevant entities per player: 50
+Updates/tick: 50 × 100 = 5,000 packets
+
+With update tiers (average 2 ticks):
+Effective updates/tick: 2,500 packets
+At 30 ticks/sec: 75,000 packets/second
+
+Reduction: 97.5%
+```
+
+## Usage in Game Scripts
+
+Lua scripts can customize relevance:
+
+```lua
+-- Make entity always relevant to specific players
+entity:SetRelevanceOverride({
+    always_relevant_to = {player1:GetID(), player2:GetID()}
+})
+
+-- Make entity only visible to owner
+entity:SetRelevanceOverride({
+    only_relevant_to = {entity:GetOwnerID()}
+})
+
+-- Custom cull distance
+entity:SetRelevanceOverride({
+    cull_distance = 5000  -- 50m instead of default
+})
+
+-- Set authority model
+entity:SetAuthorityModel("NearestClient")
+entity:SetAuthorityModel("OwnerAuthority")
+entity:SetAuthorityModel("ServerAuthority")
+```
+
+## Design Trade-offs
+
+### Pros
+- Massive bandwidth savings (97%+ reduction)
+- Scales to 1000+ entities with 100+ players
+- Distance-based update frequency matches perception
+- Hysteresis prevents flickering
+
+### Cons
+- Complexity in spawn/despawn synchronization
+- Clients don't know about far entities (can't query them)
+- Authority transfers add latency for affected entities
+
+### When to Use Always-Relevant
+
+Some entities should skip relevance checks:
+- Global state (weather, time of day)
+- Player scores/leaderboards
+- Game mode state
+- Team information
+- Chat messages
+
+## Source Code
+
+The relevance system is implemented at:
+- `crates/core-server/src/relevance/mod.rs` - RelevanceManager and configs
+- `crates/core-server/src/spatial/mod.rs` - SpatialGrid used for queries

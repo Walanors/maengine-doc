@@ -1,0 +1,10 @@
+{
+  "title": "Architecture",
+  "pages": [
+    "index",
+    "spatial-grid",
+    "ecs",
+    "class-system",
+    "relevance"
+  ]
+}

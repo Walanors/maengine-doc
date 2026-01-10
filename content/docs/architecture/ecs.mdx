@@ -1,0 +1,302 @@
+---
+title: Entity Component System
+description: How MAEngine uses Bevy ECS for game state management and networking
+---
+
+# Entity Component System (ECS)
+
+MAEngine uses [Bevy ECS](https://bevyengine.org/) as its core data architecture. This provides a performant, cache-friendly way to manage game entities while supporting the unique requirements of a multiplayer server.
+
+## Overview
+
+The ECS pattern separates data (Components) from behavior (Systems), organizing game state as:
+
+- **Entities**: Unique identifiers (just IDs, no data)
+- **Components**: Pure data attached to entities
+- **Resources**: Singleton data shared across the world
+- **Systems**: Functions that query and modify components
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Bevy World                               │
+├─────────────────────────────────────────────────────────────────┤
+│  Resources (Singletons)                                          │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐             │
+│  │ ServerClock  │ │  EntityMap   │ │  PlayerMap   │  ...        │
+│  └──────────────┘ └──────────────┘ └──────────────┘             │
+├─────────────────────────────────────────────────────────────────┤
+│  Entities with Components                                        │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │ Entity 0: [Player, PlayerMarker, PlayerConnection]       │   │
+│  ├──────────────────────────────────────────────────────────┤   │
+│  │ Entity 1: [NetworkId, Transform, CharacterMarker, ...]   │   │
+│  ├──────────────────────────────────────────────────────────┤   │
+│  │ Entity 2: [NetworkId, Transform, EntityType, ...]        │   │
+│  └──────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Core Entity Types
+
+MAEngine defines four core entity archetypes that map to the Lua API:
+
+### Player
+
+Represents a connected client session (not an in-world object).
+
+```rust
+#[derive(Component)]
+pub struct Player {
+    pub id: PlayerId,           // Unique session ID
+    pub auth_id: String,        // External auth (Steam ID, etc.)
+    pub state: PlayerState,     // Connected, Loading, Ready, etc.
+    pub character: Option<Entity>, // Currently possessed character
+    pub latency: u32,           // RTT in milliseconds
+}
+```
+
+**Associated Components:**
+- `PlayerMarker` - Tag for filtering queries
+- `PlayerConnection` - Network connection state
+- `PlayerValues` - Lua-defined synced values
+
+### Character
+
+Player-controlled entity with movement capabilities.
+
+```rust
+#[derive(Component)]
+pub struct CharacterMarker;
+
+#[derive(Component)]
+pub struct ControlledBy {
+    pub player_id: PlayerId,
+}
+
+#[derive(Component)]
+pub struct Movement {
+    pub velocity: Vec3,
+    pub control_rotation: Quat,    // Camera/aim direction
+    pub character_rotation: Quat,  // Body facing
+    pub grounded: bool,
+    pub movement_mode: MovementMode,
+}
+```
+
+Characters inherit all Entity components plus these character-specific ones.
+
+### Entity
+
+Base for all world objects that are replicated to clients.
+
+```rust
+#[derive(Component)]
+pub struct NetworkId { pub id: EntityId }  // Unique network identifier
+
+#[derive(Component)]
+pub struct Transform {
+    pub position: Vec3,
+    pub rotation: Quat,
+}
+
+#[derive(Component)]
+pub struct Owner { pub player_id: Option<PlayerId> }
+
+#[derive(Component)]
+pub struct Authority { pub holder: Option<PlayerId> }  // None = server
+```
+
+**Value Components** (for Lua-defined properties):
+- `PublicValues` - Synced to all clients
+- `PrivateValues` - Synced only to owner
+- `LocalValues` - Server-only (no sync)
+
+### Zone
+
+World container for spatial segmentation (maps, instances, levels).
+
+```rust
+#[derive(Component)]
+pub struct Zone {
+    pub id: ZoneId,
+    pub name: String,
+    pub bounds: AABB,
+    pub active: bool,
+}
+
+#[derive(Component)]
+pub struct ZoneEntities {
+    pub entities: Vec<Entity>,  // Fast lookup of zone contents
+}
+```
+
+## Resources (Global State)
+
+Resources are singletons accessible by any system:
+
+### ServerClock
+
+Fixed-timestep game time:
+
+```rust
+pub struct ServerClock {
+    pub tick: TickNumber,       // Current server tick
+    pub time_ms: ServerTime,    // Time since start
+    pub tick_delta: f64,        // Fixed timestep (1/tick_rate)
+    pub tick_rate: u32,         // Ticks per second (default: 30)
+}
+```
+
+### EntityMap & PlayerMap
+
+Bidirectional lookups between network IDs and ECS entities:
+
+```rust
+// Network ID <-> ECS Entity
+pub struct EntityMap {
+    pub network_to_ecs: HashMap<EntityId, Entity>,
+    pub ecs_to_network: HashMap<Entity, EntityId>,
+}
+
+// Player ID <-> Player Entity
+pub struct PlayerMap {
+    pub id_to_entity: HashMap<PlayerId, Entity>,
+    pub entity_to_id: HashMap<Entity, PlayerId>,
+}
+```
+
+These maps are critical for translating between:
+- Lua scripts (use network IDs)
+- ECS systems (use Entity handles)
+- Network packets (use network IDs)
+
+### ID Generators
+
+Sequential ID generation for entities and players:
+
+```rust
+pub struct EntityIdGenerator { next_id: EntityId }
+pub struct PlayerIdGenerator { next_id: PlayerId }
+```
+
+## Component Bundles
+
+Bundles group related components for convenient spawning:
+
+```rust
+#[derive(Bundle)]
+pub struct NetworkedEntityBundle {
+    pub network_id: NetworkId,
+    pub entity_type: EntityType,
+    pub transform: Transform,
+    pub previous_transform: PreviousTransform,
+    pub in_zone: InZone,
+    pub active: Active,
+    pub owner: Owner,
+    pub authority: Authority,
+    pub public_values: PublicValues,
+    pub private_values: PrivateValues,
+    pub local_values: LocalValues,
+    pub replicated: Replicated,
+}
+
+#[derive(Bundle)]
+pub struct CharacterBundle {
+    pub marker: CharacterMarker,
+    pub controlled_by: ControlledBy,
+    pub movement: Movement,
+    pub previous_movement: PreviousMovement,
+}
+```
+
+## The EntityManager Bridge
+
+Lua scripting cannot directly access Bevy ECS (different memory model). The `EntityManager` acts as a bridge:
+
+```
+┌──────────────┐        ┌───────────────────┐        ┌──────────────┐
+│  Lua Scripts │ ←────→ │   EntityManager   │ ←────→ │   Bevy ECS   │
+│              │        │   (Shared State)  │        │              │
+│ Entity.Spawn │        │ Arc<RwLock<...>>  │        │  Components  │
+│ entity:Set   │        │ pending_spawns    │        │  Resources   │
+│ entity:Get   │        │ pending_updates   │        │  Systems     │
+└──────────────┘        └───────────────────┘        └──────────────┘
+```
+
+The EntityManager stores:
+- `EntityData` - All entity state (position, rotation, values, etc.)
+- `pending_spawns` - Entities created this tick
+- `pending_updates` - State changes this tick
+- `pending_despawns` - Entities to remove
+
+Each tick:
+1. Lua scripts modify EntityManager state
+2. Main loop reads pending changes
+3. Changes are broadcast to relevant clients
+4. ECS components are updated to match
+
+## Replication Components
+
+Special components control network behavior:
+
+### Replicated
+
+Marks an entity for network replication:
+
+```rust
+#[derive(Component)]
+pub struct Replicated;  // Tag - entity will be sent to clients
+```
+
+### Dormant
+
+Optimization for rarely-changing entities:
+
+```rust
+#[derive(Component)]
+pub struct Dormant {
+    pub is_dormant: bool,
+    pub last_update_tick: u64,
+}
+```
+
+Dormant entities only replicate when state actually changes.
+
+### RelevanceOverride
+
+Custom relevance rules per-entity:
+
+```rust
+#[derive(Component)]
+pub struct RelevanceOverride {
+    pub always_relevant_to: Vec<PlayerId>,     // Always visible
+    pub only_relevant_to: Option<Vec<PlayerId>>, // Exclusive visibility
+    pub cull_distance: Option<f32>,            // Custom range
+    pub priority: Option<u8>,                  // Update priority
+}
+```
+
+## Delta Detection
+
+"Previous" components enable efficient change detection:
+
+```rust
+// Current state
+pub struct Transform { pub position: Vec3, pub rotation: Quat }
+
+// Previous tick's state
+pub struct PreviousTransform { pub position: Vec3, pub rotation: Quat }
+```
+
+Systems compare current vs previous to:
+- Only replicate changed components
+- Build delta packets (changed fields only)
+- Track entity dirtiness
+
+## Source Code
+
+The ECS module is located at:
+- `crates/core-server/src/ecs/mod.rs` - Module exports
+- `crates/core-server/src/ecs/components.rs` - Component definitions
+- `crates/core-server/src/ecs/resources.rs` - Resource definitions
+- `crates/core-server/src/ecs/entity_manager.rs` - Lua bridge

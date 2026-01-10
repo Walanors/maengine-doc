@@ -1,0 +1,362 @@
+---
+title: Class Extension System
+description: Nanos World-style Lua class hierarchy with Subscribe, BindValue, and Inherit patterns
+---
+
+# Class Extension System
+
+MAEngine implements a **Nanos World-style class hierarchy** for Lua scripting. This provides a familiar, object-oriented API with inheritance, events, and reactive value bindings.
+
+## Overview
+
+The class system allows:
+- **Subscribe**: Listen to lifecycle events (Spawn, Destroy, etc.)
+- **BindValue**: React to value changes on entities/players
+- **Inherit**: Create custom classes that extend built-in types
+- **Fire**: Trigger custom instance events
+- **IsA**: Check class hierarchy membership
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Class Hierarchy                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Entity (base)                                                   │
+│    ├── Actor (world presence)                                    │
+│    │     ├── Pawn (controllable)                                 │
+│    │     │     ├── Character (humanoid)                          │
+│    │     │     │     └── PlayerCharacter (custom)                │
+│    │     │     │     └── NPC (custom)                            │
+│    │     │     └── Vehicle (custom)                              │
+│    │     ├── StaticMesh (geometry)                               │
+│    │     ├── Blueprint (UE5 assets)                              │
+│    │     ├── Sound (audio)                                       │
+│    │     ├── Particle (effects)                                  │
+│    │     └── Prop (physics objects)                              │
+│    │           └── Door (custom)                                 │
+│                                                                  │
+│  Player (special - connected clients)                            │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Built-in Classes
+
+### Base Classes (Non-Spawnable)
+
+These provide shared functionality but cannot be directly spawned:
+
+| Class | Parent | Description |
+|-------|--------|-------------|
+| `Entity` | - | Base for all world objects. Has position, values, ownership |
+| `Actor` | Entity | World presence with visibility, collision |
+| `Pawn` | Actor | Can be controlled/possessed by a Player |
+
+### Spawnable Classes
+
+These can be instantiated with a constructor:
+
+| Class | Parent | Description |
+|-------|--------|-------------|
+| `Character` | Pawn | Player-controlled humanoid with movement |
+| `StaticMesh` | Actor | Static geometry (walls, floors, decorations) |
+| `Blueprint` | Actor | Unreal Engine Blueprint assets |
+| `Sound` | Actor | 3D audio sources |
+| `Particle` | Actor | Particle effects |
+| `Prop` | Actor | Physics-enabled objects |
+
+## Subscribe Pattern
+
+Listen to class-level lifecycle events:
+
+```lua
+-- When ANY Character spawns
+Character.Subscribe("Spawn", function(character)
+    print("Character spawned: " .. character:GetID())
+end)
+
+-- When ANY Character is destroyed
+Character.Subscribe("Destroy", function(character)
+    print("Character destroyed")
+end)
+
+-- Player events
+Player.Subscribe("Spawn", function(player)
+    local char = Character(Vec3(0, 0, 100), nil, "Human")
+    player:Possess(char)
+end)
+
+Player.Subscribe("Ready", function(player)
+    print(player:GetName() .. " is ready")
+end)
+```
+
+### Event Propagation
+
+Events propagate UP the class hierarchy. When a Character spawns:
+
+1. `Character.__events.Spawn` callbacks fire
+2. `Pawn.__events.Spawn` callbacks fire
+3. `Actor.__events.Spawn` callbacks fire
+4. `Entity.__events.Spawn` callbacks fire
+
+This allows subscribing at any level:
+
+```lua
+-- React to ANY pawn spawning (includes Characters, Vehicles, etc.)
+Pawn.Subscribe("Spawn", function(pawn)
+    print("Some pawn spawned")
+end)
+
+-- React to ANY entity spawning
+Entity.Subscribe("Spawn", function(entity)
+    print("Something spawned: " .. entity:GetClassName())
+end)
+```
+
+## BindValue Pattern
+
+React to value changes on entities or players:
+
+```lua
+-- Class-level: Any Character's health changes
+Character.BindValue("health", function(entity, key, newValue, oldValue)
+    print(entity:GetID() .. " health: " .. oldValue .. " -> " .. newValue)
+end)
+
+-- Wildcard: Any value change on Characters
+Character.BindValue("*", function(entity, key, newValue, oldValue)
+    print("Value changed: " .. key)
+end)
+
+-- Player values
+Player.BindValue("team", function(player, key, newValue, oldValue)
+    print(player:GetName() .. " switched to team " .. newValue)
+end)
+```
+
+### Instance-Level Bindings
+
+Bind to a specific entity instance:
+
+```lua
+-- On a specific character
+local char = Character(Vec3(0, 0, 0))
+
+char:BindValue("health", function(entity, key, newValue, oldValue)
+    if newValue <= 0 then
+        entity:Destroy()
+    end
+end)
+
+-- Instance events with Fire/Subscribe
+char:Subscribe("TookDamage", function(entity, amount, attacker)
+    print("Took " .. amount .. " damage!")
+end)
+
+char:Fire("TookDamage", 50, some_enemy)
+```
+
+## Inherit Pattern
+
+Create custom classes that extend built-in types:
+
+```lua
+-- Create a Door class that inherits from Prop
+Door = Prop.Inherit("Door")
+
+-- Add custom methods
+function Door:Open()
+    self:SetValue("is_open", true)
+    -- Animate the door...
+end
+
+function Door:Close()
+    self:SetValue("is_open", false)
+end
+
+function Door:Toggle()
+    if self:GetValue("is_open") then
+        self:Close()
+    else
+        self:Open()
+    end
+end
+
+-- Subscribe to Door-specific events (propagates to Prop, Actor, Entity)
+Door.Subscribe("Spawn", function(door)
+    door:SetValue("is_open", false)
+end)
+
+-- React to Door value changes
+Door.BindValue("is_open", function(door, key, newValue, oldValue)
+    print("Door " .. (newValue and "opened" or "closed"))
+end)
+
+-- Spawn doors using the custom class
+local my_door = Door(Vec3(100, 200, 0), nil, "SM_Door")
+my_door:Open()
+```
+
+### Multi-Level Inheritance
+
+Custom classes can inherit from other custom classes:
+
+```lua
+-- SlidingDoor inherits from Door
+SlidingDoor = Door.Inherit("SlidingDoor")
+
+function SlidingDoor:Open()
+    -- Custom sliding animation
+    self:SetValue("slide_offset", 200)
+    Door.Open(self) -- Call parent method
+end
+
+-- SecurityDoor with access control
+SecurityDoor = Door.Inherit("SecurityDoor")
+
+function SecurityDoor:Open()
+    if self:GetValue("locked") then
+        print("Access denied!")
+        return
+    end
+    Door.Open(self)
+end
+```
+
+### IsA Checks
+
+Check inheritance at runtime:
+
+```lua
+local door = Door(Vec3(0, 0, 0))
+
+print(door:IsA("Door"))       -- true
+print(door:IsA("Prop"))       -- true
+print(door:IsA("Actor"))      -- true
+print(door:IsA("Entity"))     -- true
+print(door:IsA("Character"))  -- false
+```
+
+## Entity Handle
+
+When you spawn an entity, you receive a **LuaEntityHandle**:
+
+```lua
+local char = Character(Vec3(0, 0, 0))
+
+-- Methods on all entities
+char:GetID()           -- Network ID (u64)
+char:GetClassName()    -- "Character" or custom class name
+char:GetPosition()     -- Vec3
+char:GetRotation()     -- Quat
+char:SetPosition(vec)
+char:SetRotation(quat)
+char:SetValue(key, value)
+char:GetValue(key)
+char:Destroy()
+char:IsA(className)
+char:IsValid()
+
+-- Character-specific methods
+char:GetVelocity()
+char:SetVelocity(vec)
+char:GetControlRotation()
+char:SetMovementMode(mode)
+```
+
+## How It Works
+
+### Rust Side
+
+The class system is implemented in Rust, bridging Lua tables with the EntityManager:
+
+```rust
+// Class hierarchy definition
+pub const CLASS_HIERARCHY: &[(&str, Option<&str>)] = &[
+    ("Entity", None),
+    ("Actor", Some("Entity")),
+    ("Pawn", Some("Actor")),
+    ("Character", Some("Pawn")),
+    // ... more classes
+];
+
+// Event propagation walks up the chain
+pub fn fire_class_event(lua: &Lua, class_name: &str, event_name: &str, args: Vec<Value>) {
+    let chain = get_class_chain(class_name); // ["Character", "Pawn", "Actor", "Entity"]
+
+    for ancestor in chain {
+        // Fire callbacks registered at each level
+        if let Ok(events) = class_table.get::<Table>("__events") {
+            // ... fire each callback
+        }
+    }
+}
+```
+
+### Lua Table Structure
+
+Each class is a Lua table with:
+
+```lua
+Character = {
+    __class_name = "Character",
+    __parent = "Pawn",
+    __events = {
+        Spawn = { callback1, callback2, ... },
+        Destroy = { callback1, ... },
+    },
+    __value_bindings = {
+        health = { callback1, callback2, ... },
+        ["*"] = { wildcardCallback, ... },
+    },
+
+    -- Methods
+    Subscribe = function(event, callback) ... end,
+    BindValue = function(key, callback) ... end,
+    Inherit = function(newClassName) ... end,
+    Spawn = function(position, rotation, asset) ... end,
+    GetByID = function(id) ... end,
+    GetAll = function() ... end,
+}
+
+-- Metatable enables constructor syntax
+setmetatable(Character, {
+    __call = Character.Spawn,  -- Character(...) == Character.Spawn(...)
+    __index = Pawn,            -- Method lookup falls through to parent
+})
+```
+
+### Custom Class Registration
+
+When you call `Inherit()`:
+
+1. A new Lua table is created with events/bindings storage
+2. The parent class is registered in `__MAE_CUSTOM_CLASSES`
+3. Metatable `__index` points to parent for method inheritance
+4. `__call` metamethod delegates to parent's Spawn
+
+## Design Philosophy
+
+### Why This Pattern?
+
+1. **Familiar to Nanos World developers**: Same API style
+2. **Flexible event handling**: Subscribe at any hierarchy level
+3. **Reactive values**: No polling needed for state changes
+4. **Extensible**: Custom classes without modifying engine
+5. **Type-safe spawning**: Constructor syntax with proper handles
+
+### Trade-offs
+
+- **Memory**: Each class has event/binding tables (minimal overhead)
+- **Propagation cost**: Events walk the full chain (usually 4-5 levels max)
+- **No multiple inheritance**: Single parent chain only
+
+## Source Code
+
+The class system is implemented at:
+- `crates/core-server/src/scripting/classes/mod.rs` - Core hierarchy & events
+- `crates/core-server/src/scripting/classes/handles.rs` - LuaEntityHandle
+- `crates/core-server/src/scripting/classes/macros.rs` - Registration helpers
+- `crates/core-server/src/scripting/classes/base/` - Base class definitions
+- `crates/core-server/src/scripting/classes/spawnable/` - Spawnable classes
