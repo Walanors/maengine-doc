@@ -1,0 +1,639 @@
+---
+title: RmlUI
+description: Lightweight HTML/CSS UI system with native Slate rendering
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# RmlUI
+
+<Callout type="warn">
+  **Status: In Progress** - The RmlUI rendering pipeline is complete. Lua API bindings are being implemented.
+</Callout>
+
+**Availability:** Client Only
+
+RmlUI provides a lightweight HTML/CSS-like UI system that renders natively through Unreal's Slate. It uses `.rml` (HTML subset) and `.rcss` (CSS subset) files for markup and styling.
+
+---
+
+## Quick Start
+
+```lua
+-- Client/ui.lua
+local hudDoc = nil
+
+Client.Subscribe("Ready", function()
+    -- Load and show HUD
+    hudDoc = UI.Load("hud.rml")
+    hudDoc:Show()
+    UI.ShowViewport(false)
+
+    -- Bind elements to Store (auto-updates!)
+    hudDoc:BindStore("#health-value", "player.health")
+    hudDoc:BindStore("#ammo-count", "weapon.ammo")
+
+    -- Handle button clicks
+    hudDoc:On("click", "#menu-button", function(event)
+        OpenPauseMenu()
+    end)
+end)
+
+-- Server values automatically flow to UI via Store
+Player.Subscribe("Ready", function(player)
+    player:BindValue("health", function(val)
+        Store.Set("player.health", val)
+    end)
+end)
+```
+
+---
+
+## Viewport Control
+
+### UI.ShowViewport
+
+Show the RmlUI overlay.
+
+```lua
+UI.ShowViewport()           -- Show without input capture
+UI.ShowViewport(false)      -- Show without input capture (HUD mode)
+UI.ShowViewport(true)       -- Show with input capture (menu mode)
+```
+
+**Parameters:**
+- `captureInput` (boolean, optional) - Whether to capture mouse input, default false
+
+---
+
+### UI.HideViewport
+
+Hide the RmlUI overlay.
+
+```lua
+UI.HideViewport()
+```
+
+---
+
+### UI.SetFocusMode
+
+Control how input is routed between UI and game.
+
+```lua
+UI.SetFocusMode("none")   -- Game only, cursor hidden
+UI.SetFocusMode("soft")   -- Mouse to UI, keyboard to game
+UI.SetFocusMode("hard")   -- All input to UI, cursor visible
+```
+
+| Mode | Mouse | Keyboard | Cursor | Use Case |
+|------|-------|----------|--------|----------|
+| `none` | Game | Game | Hidden | HUD overlay only |
+| `soft` | UI | Game | Shown | Interactive HUD (minimap clicks) |
+| `hard` | UI | UI | Shown | Menus, pause screen, inventory |
+
+---
+
+### UI.ShowCursor
+
+Show or hide the mouse cursor.
+
+```lua
+UI.ShowCursor(true)   -- Show cursor
+UI.ShowCursor(false)  -- Hide cursor
+```
+
+---
+
+## Document Loading
+
+### UI.Load
+
+Load an RML document.
+
+```lua
+local doc = UI.Load("menu.rml")
+local doc = UI.Load("hud/main.rml")
+```
+
+**Parameters:**
+- `path` (string) - Path to the .rml file relative to `games/<game>/UI/`
+
+**Returns:** `RmlDocument` handle or `nil` if loading fails
+
+---
+
+### UI.Unload
+
+Unload a document explicitly.
+
+```lua
+UI.Unload(doc)
+```
+
+---
+
+### UI.UnloadAll
+
+Unload all loaded documents.
+
+```lua
+UI.UnloadAll()
+```
+
+---
+
+## Document Object
+
+### doc:Show / doc:Hide
+
+Control document visibility.
+
+```lua
+doc:Show()    -- Make document visible
+doc:Hide()    -- Hide document
+```
+
+---
+
+### doc:Close
+
+Unload and close the document.
+
+```lua
+doc:Close()
+```
+
+---
+
+### doc:IsVisible
+
+Check if document is visible.
+
+```lua
+if doc:IsVisible() then
+    -- Document is shown
+end
+```
+
+---
+
+### doc:GetElementById
+
+Get an element by its ID attribute.
+
+```lua
+local elem = doc:GetElementById("health-bar")
+if elem then
+    elem:SetText("100 HP")
+end
+```
+
+**Parameters:**
+- `id` (string) - Element ID (without #)
+
+**Returns:** `RmlElement` or `nil` if not found
+
+---
+
+### doc:GetElementsByTagName
+
+Get all elements with a specific tag.
+
+```lua
+local buttons = doc:GetElementsByTagName("button")
+for _, btn in ipairs(buttons) do
+    btn:AddClass("styled")
+end
+```
+
+**Returns:** Table of `RmlElement` objects
+
+---
+
+### doc:GetElementsByClassName
+
+Get all elements with a specific class.
+
+```lua
+local items = doc:GetElementsByClassName("menu-item")
+```
+
+**Returns:** Table of `RmlElement` objects
+
+---
+
+### doc:CreateElement
+
+Create a new element.
+
+```lua
+local div = doc:CreateElement("div")
+div:SetAttribute("id", "new-panel")
+div:AddClass("panel")
+```
+
+**Parameters:**
+- `tagName` (string) - HTML tag name
+
+**Returns:** New `RmlElement`
+
+---
+
+## Element Object
+
+### Content
+
+```lua
+elem:GetText()                     -- Get text content
+elem:SetText("Hello World")        -- Set text content
+elem:GetInnerRML()                 -- Get inner RML markup
+elem:SetInnerRML("<p>HTML</p>")    -- Set inner RML markup
+```
+
+---
+
+### Attributes
+
+```lua
+elem:GetAttribute("data-value")           -- Get attribute
+elem:SetAttribute("data-value", "100")    -- Set attribute
+elem:RemoveAttribute("data-value")        -- Remove attribute
+elem:HasAttribute("data-value")           -- Check if exists (boolean)
+```
+
+---
+
+### Classes
+
+```lua
+elem:AddClass("active")           -- Add class
+elem:RemoveClass("active")        -- Remove class
+elem:HasClass("active")           -- Check class (boolean)
+elem:SetClass("active", true)     -- Toggle class
+elem:GetClassList()               -- Get all classes (table)
+```
+
+---
+
+### CSS Properties
+
+```lua
+elem:GetProperty("opacity")           -- Get computed property
+elem:SetProperty("opacity", "0.5")    -- Set property
+elem:RemoveProperty("opacity")        -- Remove inline property
+```
+
+---
+
+### Hierarchy
+
+```lua
+elem:GetParent()          -- Parent element
+elem:GetChildren()        -- Table of children
+elem:GetFirstChild()      -- First child
+elem:GetLastChild()       -- Last child
+elem:GetNextSibling()     -- Next sibling
+elem:GetPreviousSibling() -- Previous sibling
+```
+
+---
+
+### DOM Manipulation
+
+```lua
+parent:AppendChild(child)         -- Add child at end
+parent:RemoveChild(child)         -- Remove child
+parent:InsertBefore(new, ref)     -- Insert before reference
+parent:ReplaceChild(new, old)     -- Replace child
+```
+
+---
+
+### Focus & Scroll
+
+```lua
+elem:Focus()                 -- Set focus
+elem:Blur()                  -- Remove focus
+elem:IsFocused()             -- Check focus (boolean)
+elem:ScrollIntoView(true)    -- Scroll to element (alignTop)
+```
+
+---
+
+### Dimensions (Read-Only)
+
+```lua
+elem:GetOffsetWidth()    -- Width including padding/border
+elem:GetOffsetHeight()   -- Height including padding/border
+elem:GetClientWidth()    -- Inner width
+elem:GetClientHeight()   -- Inner height
+```
+
+---
+
+### Identity
+
+```lua
+elem:GetId()       -- Element ID attribute
+elem:GetTagName()  -- Tag name (e.g., "div")
+```
+
+---
+
+## Event System
+
+### elem:On
+
+Subscribe to element events.
+
+```lua
+local unsub = elem:On("click", function(event)
+    print("Clicked:", event.target:GetId())
+end)
+
+-- Unsubscribe later
+unsub()
+```
+
+**Parameters:**
+- `eventType` (string) - Event name: `click`, `mouseover`, `mouseout`, `focus`, `blur`, `change`, `submit`
+- `callback` (function) - Event handler
+
+**Returns:** Unsubscribe function
+
+---
+
+### doc:On (Event Delegation)
+
+Subscribe to events with CSS selector matching.
+
+```lua
+-- Only fires for clicks on #menu-button
+doc:On("click", "#menu-button", function(event)
+    print("Menu button clicked!")
+end)
+
+-- Fires for any .menu-item click
+doc:On("click", ".menu-item", function(event)
+    local id = event.target:GetId()
+    HandleMenuItem(id)
+end)
+```
+
+**Parameters:**
+- `eventType` (string) - Event name
+- `selector` (string) - CSS selector (#id or .class)
+- `callback` (function) - Event handler
+
+---
+
+### Event Object
+
+```lua
+doc:On("click", "#button", function(event)
+    event.type           -- "click"
+    event.target         -- Element that triggered event
+    event.currentTarget  -- Element handler is attached to
+
+    -- Mouse events
+    event.clientX        -- X position in viewport
+    event.clientY        -- Y position in viewport
+    event.button         -- 0=left, 1=middle, 2=right
+
+    -- Control propagation
+    event:StopPropagation()
+end)
+```
+
+---
+
+## Store Integration
+
+RmlUI integrates with the **Store** for reactive data binding. When Store values change, bound elements update automatically.
+
+### doc:BindStore
+
+Bind an element to a Store key.
+
+```lua
+-- Simple text binding
+doc:BindStore("#health-value", "player.health")
+doc:BindStore("#player-name", "player.name")
+
+-- With transform function
+doc:BindStore("#health-text", "player.health", function(value)
+    return tostring(math.floor(value)) .. " HP"
+end)
+
+-- CSS property binding (return table)
+doc:BindStore("#health-bar", "player.health", function(value)
+    return { width = tostring(value) .. "%" }
+end)
+```
+
+**Parameters:**
+- `selector` (string) - CSS selector for target element
+- `storeKey` (string) - Store key to bind to
+- `transform` (function, optional) - Transform value before applying
+
+---
+
+### doc:BindStoreClass
+
+Bind element class based on Store value.
+
+```lua
+doc:BindStoreClass("#health-bar", "player.health", function(value)
+    if value < 25 then return "critical"
+    elseif value < 50 then return "low"
+    else return "normal" end
+end)
+```
+
+---
+
+### doc:BindStoreVisible
+
+Bind element visibility based on Store value.
+
+```lua
+doc:BindStoreVisible("#low-health-warning", "player.health", function(value)
+    return value < 25
+end)
+```
+
+---
+
+### doc:BindStoreAll
+
+Batch bind multiple elements.
+
+```lua
+doc:BindStoreAll({
+    ["#health"] = "player.health",
+    ["#shield"] = "player.shield",
+    ["#ammo"] = "weapon.ammo",
+    ["#player-name"] = "player.name",
+})
+```
+
+---
+
+## Complete Example
+
+### Lua Script
+
+```lua
+-- Client/ui.lua
+local hudDoc = nil
+local pauseDoc = nil
+
+-- Initialize UI
+Client.Subscribe("Ready", function()
+    -- Load HUD
+    hudDoc = UI.Load("hud.rml")
+    hudDoc:Show()
+    UI.ShowViewport(false)
+
+    -- Bind to Store
+    hudDoc:BindStore("#health-value", "player.health", function(v)
+        return tostring(math.floor(v))
+    end)
+    hudDoc:BindStore("#health-bar-fill", "player.health", function(v)
+        return { width = tostring(v) .. "%" }
+    end)
+    hudDoc:BindStoreClass("#health-bar", "player.health", function(v)
+        if v < 25 then return "critical"
+        elseif v < 50 then return "low"
+        else return "normal" end
+    end)
+
+    -- Load pause menu (hidden)
+    pauseDoc = UI.Load("pause_menu.rml")
+
+    -- Wire up buttons
+    pauseDoc:On("click", "#resume-btn", function()
+        ClosePauseMenu()
+    end)
+    pauseDoc:On("click", "#quit-btn", function()
+        Events.CallServer("RequestQuit")
+    end)
+end)
+
+-- Bridge server values to Store
+Player.Subscribe("Ready", function(player)
+    player:BindValue("health", function(val)
+        Store.Set("player.health", val)
+    end)
+end)
+
+-- Pause menu toggle
+function OpenPauseMenu()
+    pauseDoc:Show()
+    UI.SetFocusMode("hard")
+    UI.ShowCursor(true)
+end
+
+function ClosePauseMenu()
+    pauseDoc:Hide()
+    UI.SetFocusMode("none")
+    UI.ShowCursor(false)
+end
+
+Input.Bind("Escape", Input.Pressed, function()
+    if pauseDoc:IsVisible() then
+        ClosePauseMenu()
+    else
+        OpenPauseMenu()
+    end
+end)
+```
+
+### RML File
+
+```xml
+<!-- games/my_game/UI/hud.rml -->
+<rml>
+<head>
+    <title>HUD</title>
+    <link type="text/rcss" href="hud.rcss"/>
+</head>
+<body>
+    <div id="health-container">
+        <div id="health-bar">
+            <div id="health-bar-fill"></div>
+        </div>
+        <span id="health-value">100</span>
+    </div>
+
+    <div id="ammo-container">
+        <span id="ammo-current">30</span>
+        <span class="separator">/</span>
+        <span id="ammo-reserve">120</span>
+    </div>
+</body>
+</rml>
+```
+
+### RCSS File
+
+```css
+/* games/my_game/UI/hud.rcss */
+body {
+    font-family: Inter;
+    font-size: 16dp;
+    color: #ffffff;
+}
+
+#health-container {
+    position: absolute;
+    bottom: 20dp;
+    left: 20dp;
+}
+
+#health-bar {
+    width: 200dp;
+    height: 20dp;
+    background-color: #333333;
+    border-radius: 4dp;
+}
+
+#health-bar-fill {
+    height: 100%;
+    background-color: #44ff44;
+    border-radius: 4dp;
+    transition: width 0.3s;
+}
+
+#health-bar.low #health-bar-fill {
+    background-color: #ffaa00;
+}
+
+#health-bar.critical #health-bar-fill {
+    background-color: #ff4444;
+    animation: pulse 0.5s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+```
+
+---
+
+## File Structure
+
+```
+games/my_game/
+├── Client/
+│   └── ui.lua           # UI logic
+└── UI/
+    ├── hud.rml          # HUD markup
+    ├── hud.rcss         # HUD styles
+    ├── pause_menu.rml   # Pause menu markup
+    ├── pause_menu.rcss  # Pause menu styles
+    └── fonts/
+        └── Inter.ttf    # Custom font
+```

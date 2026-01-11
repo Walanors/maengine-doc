@@ -1,0 +1,92 @@
+---
+title: User Interface
+description: UI systems for building game interfaces
+---
+
+import { Cards, Card } from 'fumadocs-ui/components/card';
+import { Layout, Globe, Layers } from 'lucide-react';
+
+# User Interface
+
+MAEngine provides multiple UI systems for different use cases. All UI systems integrate with the **Store** for reactive data binding.
+
+<Cards>
+  <Card
+    icon={<Layout />}
+    title="RmlUI"
+    description="Lightweight HTML/CSS UI with native Slate rendering. In Progress."
+    href="/docs/scripting/ui/rmlui"
+  />
+  <Card
+    icon={<Globe />}
+    title="WebUI"
+    description="Full HTML/CSS/JS powered by Ultralight browser engine."
+    href="/docs/scripting/ui/webui"
+  />
+  <Card
+    icon={<Layers />}
+    title="Widget"
+    description="Native UMG widgets with ViewModel binding. Coming Soon."
+    href="/docs/scripting/ui/widget"
+  />
+</Cards>
+
+---
+
+## Comparison
+
+| Feature | RmlUI | WebUI | Widget |
+|---------|-------|-------|--------|
+| **Rendering** | Native Slate | Ultralight (Chromium) | UMG |
+| **Markup** | RML (HTML subset) | Full HTML5 | Blueprint/C++ |
+| **Styling** | RCSS (CSS subset) | Full CSS3 | UMG Styles |
+| **Scripting** | Lua bindings | JavaScript + Lua | Blueprint + Lua |
+| **Performance** | Excellent | Good | Excellent |
+| **Complexity** | Low | Medium | Medium |
+| **Use Case** | HUDs, simple menus | Complex UIs, web content | Native widgets |
+| **Status** | In Progress | Stable | Coming Soon |
+
+---
+
+## Architecture
+
+All UI systems share the same data layer through **Store**:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        STORE                                 │
+│  player.health, player.shield, weapon.ammo, settings.*, ... │
+└─────────────────────────────────────────────────────────────┘
+        │                    │                    │
+        ▼                    ▼                    ▼
+   ┌─────────┐         ┌─────────┐         ┌─────────┐
+   │  RmlUI  │         │  WebUI  │         │ Widget  │
+   │BindStore│         │  Store  │         │ViewModel│
+   └─────────┘         └─────────┘         └─────────┘
+```
+
+**Benefits:**
+- Single source of truth for all game state
+- Update Store once, all UIs react automatically
+- Mix and match UI systems as needed
+
+---
+
+## When to Use What
+
+### RmlUI
+- Game HUDs (health, ammo, minimap)
+- Simple menus (pause, settings)
+- Performance-critical overlays
+- When you want HTML/CSS without JavaScript complexity
+
+### WebUI
+- Complex interactive UIs
+- Existing web-based designs
+- When you need full JavaScript capabilities
+- Rich animations and effects
+
+### Widget (Future)
+- Native Unreal widgets
+- Designer-friendly Blueprint workflows
+- When you need UMG-specific features

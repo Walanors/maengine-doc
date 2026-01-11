@@ -1,0 +1,387 @@
+---
+title: WebUI
+description: Full HTML/CSS/JS UI system powered by Ultralight browser engine
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# WebUI
+
+**Availability:** Client Only
+
+WebUI provides a full HTML/CSS/JS UI system powered by the Ultralight browser engine. Use standard web technologies to create complex, interactive interfaces.
+
+---
+
+## Quick Start
+
+```lua
+-- Client/ui.lua
+local hud = nil
+
+Client.Subscribe("Ready", function()
+    hud = WebUI.CreateAtScale("HUD", "hud/index.html")
+    hud:SetFullscreen(true)
+    WebUI.ShowViewport(false)
+
+    -- Receive events from JavaScript
+    hud:Subscribe("ButtonClicked", function(button_id)
+        Events.CallServer("UIButtonClicked", { button = button_id })
+    end)
+end)
+
+-- Bridge Store values to JavaScript
+Store.Subscribe("player.health", function(value)
+    if hud then hud:CallEvent("UpdateHealth", value) end
+end)
+```
+
+---
+
+## Viewport Control
+
+### WebUI.ShowViewport
+
+Show the WebUI overlay.
+
+```lua
+WebUI.ShowViewport()           -- Show without input capture
+WebUI.ShowViewport(false)      -- Show without input capture (HUD mode)
+WebUI.ShowViewport(true)       -- Show with input capture (menu mode)
+```
+
+---
+
+### WebUI.HideViewport
+
+Hide the WebUI overlay.
+
+```lua
+WebUI.HideViewport()
+```
+
+---
+
+### WebUI.SetFocusMode
+
+Control how input is routed between UI and game.
+
+```lua
+WebUI.SetFocusMode("none")   -- Game only, cursor hidden
+WebUI.SetFocusMode("soft")   -- Mouse to UI, keyboard to game
+WebUI.SetFocusMode("hard")   -- All input to UI, cursor visible
+```
+
+| Mode | Mouse | Keyboard | Cursor | Use Case |
+|------|-------|----------|--------|----------|
+| `none` | Game | Game | Hidden | HUD overlay only |
+| `soft` | UI | Game | Shown | Interactive HUD |
+| `hard` | UI | UI | Shown | Menus, forms |
+
+---
+
+## Constructors
+
+### WebUI(name, url, visible)
+
+Create a fullscreen WebUI.
+
+```lua
+local ui = WebUI("HUD", "hud/index.html", true)
+local ui = WebUI("Menu", "menu/index.html", false)
+```
+
+**Parameters:**
+- `name` (string) - Unique identifier for this WebUI
+- `url` (string) - Path to HTML file relative to `games/<game>/Client/UI/`
+- `visible` (boolean, optional) - Initial visibility, default true
+
+---
+
+### WebUI.CreateWithSize
+
+Create a WebUI with specific dimensions.
+
+```lua
+local ui = WebUI.CreateWithSize("Minimap", "minimap/index.html", 300, 300)
+```
+
+**Parameters:**
+- `name` (string) - Unique identifier
+- `url` (string) - Path to HTML file
+- `width` (integer) - Width in pixels
+- `height` (integer) - Height in pixels
+
+---
+
+### WebUI.CreateAtScale
+
+Create a WebUI scaled relative to viewport.
+
+```lua
+local ui = WebUI.CreateAtScale("HUD", "hud/index.html", 0.5)  -- 50% of viewport
+local ui = WebUI.CreateAtScale("HUD", "hud/index.html")       -- 100% default
+```
+
+**Parameters:**
+- `name` (string) - Unique identifier
+- `url` (string) - Path to HTML file
+- `scale` (number, optional) - Scale factor (0.0 to 1.0), default 1.0
+
+---
+
+## Instance Methods
+
+### Visibility & Focus
+
+```lua
+ui:SetVisible(true)        -- Show/hide
+ui:IsVisible()             -- Check visibility (boolean)
+ui:SetFocus(true)          -- Set keyboard focus
+ui:HasFocus()              -- Check focus (boolean)
+```
+
+---
+
+### Z-Order
+
+```lua
+ui:BringToFront()          -- Move to top of stack
+ui:SendToBack()            -- Move to bottom of stack
+ui:SetZOrder(100)          -- Set explicit z-order (higher = on top)
+```
+
+---
+
+### Size & Position
+
+```lua
+ui:SetSize(800, 600)       -- Set dimensions in pixels
+ui:SetPosition(100, 100)   -- Set position from top-left
+ui:SetFullscreen(true)     -- Fill entire viewport
+```
+
+---
+
+### Lifecycle
+
+```lua
+ui:Reload()                -- Refresh the page
+ui:Destroy()               -- Remove and cleanup
+```
+
+---
+
+## Lua ↔ JavaScript Communication
+
+### CallEvent (Lua → JS)
+
+Send data from Lua to JavaScript.
+
+```lua
+ui:CallEvent("UpdateHealth", 75)
+ui:CallEvent("ShowNotification", "Welcome!", "info")
+ui:CallEvent("SetPlayerData", { name = "John", score = 100 })
+```
+
+```javascript
+// JavaScript
+Events.Subscribe("UpdateHealth", (health) => {
+    document.getElementById("health-bar").style.width = health + "%";
+});
+
+Events.Subscribe("SetPlayerData", (data) => {
+    document.getElementById("player-name").textContent = data.name;
+});
+```
+
+---
+
+### Subscribe (JS → Lua)
+
+Receive events from JavaScript.
+
+```lua
+ui:Subscribe("ButtonClicked", function(button_id)
+    Log("Button clicked: " .. button_id)
+end)
+```
+
+```javascript
+// JavaScript
+document.getElementById("buy-btn").onclick = () => {
+    Events.Call("ButtonClicked", "buy-btn");
+};
+```
+
+---
+
+### ExecuteJS
+
+Execute raw JavaScript code.
+
+```lua
+ui:ExecuteJS("document.body.style.backgroundColor = 'red'")
+ui:ExecuteJS("updateScore(" .. score .. ")")
+```
+
+---
+
+### Unsubscribe
+
+Remove a JavaScript event subscription.
+
+```lua
+ui:Unsubscribe("ButtonClicked")
+```
+
+---
+
+## Store Integration
+
+WebUI integrates with the **Store** through event bridging. Subscribe to Store changes and forward them to JavaScript.
+
+```lua
+-- Bridge Store to JavaScript
+local function BindStoreToJS(hud, storeKey, jsEvent)
+    Store.Subscribe(storeKey, function(value)
+        hud:CallEvent(jsEvent, value)
+    end)
+end
+
+Client.Subscribe("Ready", function()
+    local hud = WebUI.CreateAtScale("HUD", "hud/index.html")
+
+    -- Bind Store keys to JS events
+    BindStoreToJS(hud, "player.health", "UpdateHealth")
+    BindStoreToJS(hud, "player.shield", "UpdateShield")
+    BindStoreToJS(hud, "weapon.ammo", "UpdateAmmo")
+end)
+
+-- Server values flow to Store
+Player.Subscribe("Ready", function(player)
+    player:BindValue("health", function(val)
+        Store.Set("player.health", val)
+    end)
+end)
+```
+
+---
+
+## Performance
+
+```lua
+WebUI.SetTargetFPS(60)              -- Set UI render target FPS
+local fps = WebUI.GetTargetFPS()    -- Get current target FPS
+WebUI.SetGPUAcceleration(true)      -- Enable GPU rendering
+WebUI.SetEnabled(false)             -- Disable all WebUI rendering
+```
+
+---
+
+## Viewport Info
+
+```lua
+local width, height = WebUI.GetViewportSize()
+local visible = WebUI.IsViewportVisible()
+```
+
+---
+
+## Complete Example
+
+### Lua Script
+
+```lua
+-- Client/ui.lua
+local hud = nil
+
+Client.Subscribe("Ready", function()
+    hud = WebUI.CreateAtScale("HUD", "hud/index.html")
+    hud:SetFullscreen(true)
+    WebUI.ShowViewport(false)
+
+    -- Receive from JS
+    hud:Subscribe("ReadyClicked", function()
+        Events.CallServer("PlayerReady", {})
+    end)
+end)
+
+-- Bridge Store to JS
+Store.Subscribe("player.health", function(value)
+    if hud then hud:CallEvent("UpdateHealth", value) end
+end)
+
+Store.Subscribe("player.score", function(value)
+    if hud then hud:CallEvent("UpdateScore", value) end
+end)
+
+-- Receive from server
+Events.SubscribeRemote("GameMessage", function(data)
+    if hud then
+        hud:CallEvent("ShowMessage", data.text, data.duration)
+    end
+end)
+```
+
+### HTML
+
+```html
+<!-- games/my_game/Client/UI/hud/index.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="health-container">
+        <div id="health-bar"></div>
+        <span id="health-text">100</span>
+    </div>
+    <div id="score">Score: 0</div>
+    <button id="ready-btn">Ready</button>
+
+    <script src="script.js"></script>
+</body>
+</html>
+```
+
+### JavaScript
+
+```javascript
+// games/my_game/Client/UI/hud/script.js
+Events.Subscribe("UpdateHealth", (health) => {
+    document.getElementById("health-bar").style.width = health + "%";
+    document.getElementById("health-text").textContent = health;
+});
+
+Events.Subscribe("UpdateScore", (score) => {
+    document.getElementById("score").textContent = "Score: " + score;
+});
+
+document.getElementById("ready-btn").onclick = () => {
+    Events.Call("ReadyClicked");
+};
+```
+
+---
+
+## File Structure
+
+```
+games/my_game/
+├── Client/
+│   ├── ui.lua           # UI logic
+│   └── UI/
+│       ├── hud/
+│       │   ├── index.html
+│       │   ├── style.css
+│       │   └── script.js
+│       └── menu/
+│           ├── index.html
+│           ├── style.css
+│           └── script.js
+└── Server/
+    └── init.lua
+```
+

@@ -3,6 +3,7 @@
   "pages": [
     "server",
     "client",
+    "ui",
     "shared"
   ],
   "defaultOpen": false

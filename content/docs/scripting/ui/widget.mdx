@@ -1,0 +1,94 @@
+---
+title: Widget
+description: Native UMG widgets with ViewModel binding
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# Widget
+
+<Callout type="info">
+  **Status: Coming Soon** - Native Widget support is planned for a future release.
+</Callout>
+
+**Availability:** Client Only
+
+The Widget system will provide access to Unreal's native UMG (Unreal Motion Graphics) widgets with Lua bindings and Store integration.
+
+---
+
+## Planned Features
+
+### Native UMG Widgets
+
+Create and manipulate native Unreal widgets from Lua:
+
+```lua
+-- Planned API (subject to change)
+local button = Widget.Create("Button")
+button:SetText("Click Me")
+button:SetPosition(100, 100)
+button:SetSize(200, 50)
+
+button:On("Clicked", function()
+    Log("Button was clicked!")
+end)
+```
+
+---
+
+### Store Integration
+
+Widgets will integrate with Store for reactive data binding:
+
+```lua
+-- Planned API (subject to change)
+local healthBar = Widget.Create("ProgressBar")
+healthBar:BindStore("player.health", function(value)
+    return value / 100  -- Progress bars use 0-1 range
+end)
+```
+
+---
+
+### Blueprint Widget Support
+
+Load and interact with Blueprint-designed widgets:
+
+```lua
+-- Planned API (subject to change)
+local inventory = Widget.LoadBlueprint("WBP_Inventory")
+inventory:Show()
+
+-- Access named widgets from Blueprint
+local slotGrid = inventory:GetWidget("SlotGrid")
+slotGrid:SetSlots(playerInventory)
+```
+
+---
+
+## Use Cases
+
+- **Native Performance** - UMG widgets render at native speed
+- **Designer Workflow** - Artists can design UIs in UMG Editor
+- **Complex Widgets** - Rich components like ScrollBox, TreeView, ListView
+- **Platform Features** - Virtual keyboard, focus navigation, accessibility
+
+---
+
+## Comparison with Other UI Systems
+
+| Aspect | Widget | RmlUI | WebUI |
+|--------|--------|-------|-------|
+| **Design Tool** | UMG Editor | Text files | Browser devtools |
+| **Hot Reload** | Requires recompile | Yes | Yes |
+| **Performance** | Excellent | Excellent | Good |
+| **Flexibility** | Low | Medium | High |
+| **Learning Curve** | UE knowledge | HTML/CSS | Web dev |
+
+---
+
+## Timeline
+
+Widget support will be implemented after the RmlUI Lua API is complete. Stay tuned for updates.
+
